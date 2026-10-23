@@ -72,6 +72,7 @@ export async function buildApp() {
     const simulator = new URL(process.env.POC_PLATFORM_URL);
     app.route({ method: ['GET', 'POST'], url: '/poc/*', handler: async (request, reply) => {
       const path = new URL(request.raw.url, origin);
+      if (!path.pathname.startsWith('/poc/')) throw invalid();
       const headers = {};
       for (const key of ['cookie', 'origin', 'sec-fetch-site']) if (request.headers[key]) headers[key] = request.headers[key];
       if (request.method === 'POST') headers['content-type'] = 'application/json';

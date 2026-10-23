@@ -2,6 +2,8 @@ import mysql from 'mysql2/promise';
 import { readFile } from 'node:fs/promises';
 import { bootstrap, reports, notices } from '../../src/lib/portal-fixtures.ts';
 import { businessDate } from '../src/http.js';
+import assert from 'node:assert/strict';
+import { noticesFor } from '../src/repository.js';
 
 // Run as a Railway pre-deploy command with the MySQL administrator, not the BFF account.
 const db = await mysql.createConnection({ host: process.env.MYSQLHOST, port: Number(process.env.MYSQLPORT || 3306), user: process.env.MYSQLUSER, password: process.env.MYSQLPASSWORD, database: process.env.MYSQLDATABASE, multipleStatements: true });
@@ -51,4 +53,16 @@ try {
     await db.query('INSERT INTO portal_data_batch (batch_id,data_as_of) VALUES (1,?)',[asOf]);
     await db.commit(); console.log('Seeded synthetic portal data, three users and permission boundary cases.');
   }
+  const reader = await mysql.createConnection({ host: process.env.MYSQLHOST, port: Number(process.env.MYSQLPORT || 3306), user: 'portal_reader', password: process.env.PORTAL_DB_PASSWORD, database, dateStrings: true });
+  try {
+    await reader.query('SELECT report_id FROM report_metadata LIMIT 1');
+    await assert.rejects(reader.query('SELECT * FROM poc_sessions LIMIT 1'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
+    await assert.rejects(reader.query('UPDATE report_metadata SET sort_no=sort_no WHERE 1=0'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
+  } finally { await reader.end(); }
+  // A rolled-back row checks the inclusive DATE boundary against real MySQL on every deploy.
+  await db.beginTransaction();
+  await db.query('INSERT INTO fr_index_noticement (notice_uuid,notice_title,notice_start_day_id,notice_last_day_id,notice_register_day_id,notice_region_id) VALUES (?,?,?,?,?,?)',['poc-date-boundary','结束日当天有效',businessDate(),businessDate(),businessDate(),'topics']);
+  assert.ok((await noticesFor(db,{ids:new Set(['topics'])})).some(n=>n.id==='poc-date-boundary'));
+  await db.rollback();
+  console.log('Verified: read-only BFF privileges, session-table isolation and inclusive notice end date.');
 } catch(error) { await db.rollback(); console.error('Seed failed:', error.code || 'SEED_ERROR'); process.exitCode=1; } finally { await db.end(); }

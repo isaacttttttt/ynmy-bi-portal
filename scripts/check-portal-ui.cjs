@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const mockHttp = process.env.PORTAL_MOCK_HTTP === '1';
+const livePoc = process.env.PORTAL_LIVE_POC === '1';
 let mockRequest;
 if (mockHttp) {
   const ts = require('typescript');
@@ -18,6 +19,20 @@ if (mockHttp) {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   const base = process.env.PORTAL_URL || 'http://localhost:3000';
   const reads = [];
+  let accessKey, initialFavorite;
+  const liveWrite = async (url, data) => {
+    const response = await context.request.fetch(base + url, {method:url.startsWith('/api/')?'PUT':'POST',headers:{Origin:base},data});
+    assert.equal(response.status(),200,url); return response;
+  };
+  if (livePoc) {
+    assert(!mockHttp,'Live verification must not intercept HTTP');
+    accessKey = process.env.POC_ACCESS_KEY || JSON.parse(await fs.readFile('artifacts/qa/railway-secrets.json','utf8')).accessKey;
+    await liveWrite('/poc/login',{user:'admin',accessKey});
+    const bootstrap=await (await context.request.get(base+'/api/portal/v1/bootstrap')).json();
+    initialFavorite=bootstrap.data.favoriteIds.includes('entry-1');
+    await liveWrite('/api/portal/v1/favorites/entry-1',{favorite:false});
+    page.on('request',request=>{const u=new URL(request.url());if(request.method()==='GET'&&u.pathname.startsWith('/api/portal/v1/'))reads.push(u.pathname.replace('/api/portal/v1','')+u.search);});
+  }
   let refreshMode = 'initial';
   if (mockHttp) await page.context().route('**/api/portal/v1/**', async route => {
     const request = route.request(), url = new URL(request.url());
@@ -170,6 +185,7 @@ if (mockHttp) {
     await host.addInitScript(()=>{
       Storage.prototype.getItem = Storage.prototype.setItem = () => { throw new DOMException('Storage blocked','SecurityError'); };
     });
+    if(livePoc) await host.goto(base+'/poc/');
     await host.setContent(`<iframe name="embedded-portal" src="${base}/" style="width:1280px;height:640px;border:0"></iframe>`);
     const embedded=host.frame({name:'embedded-portal'});
     await embedded.locator('.workbench-card').first().waitFor();
@@ -183,6 +199,42 @@ if (mockHttp) {
       assert.equal(await embedded.getByRole('button',{name:'双向自适应',exact:true}).getAttribute('aria-pressed'),'true');
     }
     await host.close();
+    if (livePoc) {
+      await page.clock.install();
+      await page.goto(base); await page.locator('.workbench-card').first().waitFor();
+      const countReads=()=>reads.filter(p=>p.startsWith('/workbench?')).length;
+      const before=countReads();
+      for(const name of ['我收藏的','最近打开','我常用的'])await page.getByRole('button',{name,exact:true}).click();
+      assert.equal(countReads(),before,'Live tab switching uses cache');
+      await liveWrite('/api/portal/v1/favorites/entry-1',{favorite:true});
+      await page.clock.fastForward(600100);
+      await page.getByRole('button',{name:'取消收藏集团经营分析总览驾驶舱',exact:true}).waitFor();
+      assert.equal(countReads(),before+3,'Live refresh fetches all tabs');
+      await liveWrite('/poc/control',{accessKey,action:'fault',user:'admin',fault:'tree-unavailable'});
+      const failed=page.waitForResponse(r=>r.url().includes('/workbench?')&&r.status()===502);
+      await page.clock.fastForward(600100); await failed;
+      assert(await page.locator('.workbench-card').count()>0,'Live upstream failure preserves last view');
+      await liveWrite('/poc/control',{accessKey,action:'fault',user:'admin',fault:'none'});
+      await liveWrite('/api/portal/v1/favorites/entry-1',{favorite:false});
+      await liveWrite('/poc/logout',{});
+      await page.clock.fastForward(600100);
+      await page.getByText('登录已过期，请返回帆软平台重新登录',{exact:true}).waitFor();
+      assert.equal(await page.locator('.workbench-card').count(),0);
+      await page.goto(base+'/poc/');
+      await page.locator('#key').fill(accessKey); await page.locator('#login').click();
+      const portal=page.frameLocator('#portal');
+      await portal.locator('.workbench-card .card-main').first().click();
+      await page.frameLocator('#report').getByText('这是 Railway 上的帆软模拟预览，不包含真实业务报表。',{exact:true}).waitFor();
+      await page.locator('#close').click();
+      await portal.getByRole('combobox',{name:'选择事业群'}).selectOption('clinical');
+      await portal.getByRole('button',{name:/终端数据面板.*BI 分析/}).click();
+      await page.frameLocator('#report').getByRole('heading',{name:'终端数据面板'}).waitFor();
+      await page.locator('#close').click();
+      await page.locator('#user').selectOption('empty'); await page.locator('#login').click();
+      await portal.getByText('暂无符合条件的内容',{exact:true}).first().waitFor();
+      assert.equal(await portal.locator('.workbench-card').count(),0);
+      console.log('Live Railway: cache, 10-minute refresh, persistent favorite update, upstream failure, session expiry, parent BI/FS preview and empty user passed.');
+    }
     if (mockHttp) {
       await page.setViewportSize({width:1920,height:1080});
       await page.clock.install();
@@ -214,5 +266,13 @@ if (mockHttp) {
     }
     assert.deepEqual(errors, []);
     console.log('Browser checks passed: desktop widths, three display modes, persistence, unscaled dialogs, fixed panels, scrollbars, notice alignment, dictionary bottoms and main interactions.' + (mockHttp ? ' HTTP cache, 10-minute refresh, transient failure and session expiry passed.' : ''));
-  } finally { await browser.close(); }
+  } finally {
+    if(livePoc && initialFavorite!==undefined){
+      await liveWrite('/poc/login',{user:'admin',accessKey});
+      await liveWrite('/poc/control',{accessKey,action:'fault',user:'admin',fault:'none'});
+      await liveWrite('/api/portal/v1/favorites/entry-1',{favorite:initialFavorite});
+      await liveWrite('/poc/logout',{});
+    }
+    await browser.close();
+  }
 })().catch(error => {console.error(error);process.exitCode=1;});

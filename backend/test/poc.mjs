@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { request as httpsRequest } from 'node:https';
 
 const base = process.env.POC_BASE_URL || 'https://portal-production-c6e5.up.railway.app';
 const accessKey = process.env.POC_ACCESS_KEY || JSON.parse(await readFile(new URL('../../artifacts/qa/railway-secrets.json', import.meta.url), 'utf8')).accessKey;
@@ -21,7 +22,31 @@ async function login(user) {
   return cookie.split(';')[0];
 }
 const api = '/api/portal/v1';
+const restartFile = new URL('../../artifacts/qa/restart-check.json', import.meta.url);
+if (process.argv.includes('--prepare-restart')) {
+  const cookie = await login('admin');
+  const before = await call(api + '/bootstrap', { cookie });
+  await writeFile(restartFile, JSON.stringify({ cookie, favorite: before.favoriteIds.includes('entry-1') }));
+  await call(api + '/favorites/entry-1', { cookie, method: 'PUT', body: { favorite: true } });
+  console.log('Prepared: session and favorite stored; restart the cloud services, then run --verify-restart.');
+  process.exit(0);
+}
+if (process.argv.includes('--verify-restart')) {
+  const saved = JSON.parse(await readFile(restartFile, 'utf8'));
+  const after = await call(api + '/bootstrap', { cookie: saved.cookie });
+  assert.ok(after.favoriteIds.includes('entry-1'), 'Favorite and authenticated session must survive service restarts');
+  await call(api + '/favorites/entry-1', { cookie: saved.cookie, method: 'PUT', body: { favorite: saved.favorite } });
+  await call('/poc/logout', { cookie: saved.cookie, method: 'POST', body: {} });
+  await unlink(restartFile);
+  console.log('PASS: session and favorite survived service restarts; original favorite state restored.');
+  process.exit(0);
+}
 await call('/health', { raw: true });
+const traversalStatus = await new Promise((resolve, reject) => {
+  const request = httpsRequest(base, { path: '/poc/%2e%2e/health', timeout: 15000 }, response => { response.resume(); resolve(response.statusCode); });
+  request.on('error', reject); request.on('timeout', () => request.destroy(new Error('Gateway boundary test timed out'))); request.end();
+});
+assert.ok([400,404].includes(traversalStatus), 'Normalized PoC paths cannot reach private non-PoC routes'); checks++;
 await call(api + '/bootstrap', { status: 401 });
 await call('/poc/login', { method: 'POST', body: { user: 'admin', accessKey: 'invalid' }, status: 403 });
 const admin = await login('admin'), clinical = await login('clinical'), empty = await login('empty');

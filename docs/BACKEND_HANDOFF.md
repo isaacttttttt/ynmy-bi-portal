@@ -70,4 +70,19 @@ Railway 服务配置：
 node backend/test/poc.mjs
 ```
 
+浏览器直接连接云端接口：
+
+```powershell
+$env:PLAYWRIGHT_MODULE='本机已有 playwright 模块的绝对目录'
+$env:PORTAL_URL='https://portal-production-c6e5.up.railway.app'
+$env:PORTAL_LIVE_POC='1'
+node scripts/check-portal-ui.cjs
+```
+
+重启持久化检查：先运行 `node backend/test/poc.mjs --prepare-restart`，在 Railway 重启或重新部署 portal 与 platform-simulator，待两个服务均成功后运行 `node backend/test/poc.mjs --verify-restart`。脚本验证同一会话和新增收藏仍有效，再恢复原收藏状态；临时会话文件只写入忽略目录。
+
+预部署脚本还会连接真实 MySQL 检查 portal_reader 能读业务表、不能写业务表或读取会话表，并用回滚事务验证公告结束日当天仍可见。示例公告有效期以首次初始化日期为准，长期复用测试库时需刷新示例日期；访问日期不会伪装成实时数据。
+
+前端固定 Next.js 15.5.28，并将 PostCSS 统一到修复版本；依赖锁文件随代码提交。运行镜像只包含静态页面和 Fastify 后端，不运行 Next.js 开发服务器。
+
 浏览器截图与实际验收结果保存在本机 `artifacts/qa/`。测试控制接口 `/poc/control` 同时要求测试管理员会话、访问码和同源 Origin，仅用于本测试项目的权限收回、会话过期及上游故障场景。
