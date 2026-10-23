@@ -84,7 +84,7 @@ if (mockHttp) {
     await page.mouse.move(0,0);
     assert.equal(await scroll.evaluate(el => getComputedStyle(el).getPropertyValue('--scroll-thumb').trim()),'transparent');
     await scroll.hover();
-    assert.equal(await scroll.evaluate(el => getComputedStyle(el).getPropertyValue('--scroll-thumb').trim()),'#2575ff');
+    assert.equal(await scroll.evaluate(el => getComputedStyle(el).getPropertyValue('--scroll-thumb').trim()),'#1677ff');
     await page.mouse.move(0,0);
     await scroll.evaluate(el => {el.scrollTop = 50;});
     await page.waitForFunction(() => document.querySelector('.panel-scroll').classList.contains('is-scrolling'));

@@ -26,7 +26,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'repo
     function place() {
       const rect = anchor.current!.getBoundingClientRect();
       const width = Math.min(rect.width, window.innerWidth - 32);
-      setPosition({ left: Math.max(16, Math.min(rect.left, window.innerWidth - width - 16)), top: rect.bottom + 10, width, maxHeight: Math.max(120, Math.min(560, window.innerHeight - rect.bottom - 26)) });
+      setPosition({ left: Math.max(16, Math.min(rect.left, window.innerWidth - width - 16)), top: rect.bottom + 10, width, maxHeight: Math.max(120, Math.min(400, window.innerHeight - rect.bottom - 26)) });
     }
     function outside(event: PointerEvent) { if (!anchor.current?.contains(event.target as Node) && !dropdown.current?.contains(event.target as Node)) setOpen(false); }
     function escape(event: KeyboardEvent) { if (event.key === 'Escape') { field.current?.focus(); setOpen(false); } }

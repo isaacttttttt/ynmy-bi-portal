@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { ChevronDown, ChevronUp, Monitor } from 'lucide-react';
 
 const modes = [
@@ -17,6 +18,7 @@ export default function PortalViewport({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<DisplayMode>('current');
   const viewport = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLDivElement>(null);
+  const transition = useRef<ViewTransition | null>(null);
   const [size, setSize] = useState({ width: designWidth, height: 1080, contentHeight: 1080 });
   useEffect(() => {
     try {
@@ -38,9 +40,16 @@ export default function PortalViewport({ children }: { children: ReactNode }) {
     return () => { observer.disconnect(); window.removeEventListener('resize', measure); };
   }, [mode]);
   function choose(next: DisplayMode) {
-    setMode(next);
+    if (next === mode && !transition.current) return;
+    transition.current?.skipTransition();
+    const update = () => { flushSync(() => setMode(next)); window.scrollTo(0, 0); };
+    if (document.startViewTransition && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const active = document.startViewTransition(update);
+      transition.current = active;
+      void active.ready.catch(() => { /* A newer selection may skip this animation. */ });
+      void active.finished.then(() => { if (transition.current === active) transition.current = null; });
+    } else update();
     try { localStorage.setItem(storageKey, next); } catch { /* Keep the selection for this page. */ }
-    window.scrollTo(0, 0);
   }
   const scaled = mode !== 'current';
   const scaleX = size.width / designWidth;
