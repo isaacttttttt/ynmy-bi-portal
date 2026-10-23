@@ -48,7 +48,7 @@ Railway 服务配置：
 
 业务 DDL：`backend/sql/001-portal.sql`；模拟平台 DDL：`backend/sql/002-platform-poc.sql`。`poc_*` 表不属于正式业务模型。
 
-搜索历史 DDL：`backend/sql/003-search-history.sql`。现有 Railway 库在模拟服务预部署时自动建此新表并授予单表权限，不清空已有数据。正式库需先执行此脚本并授权，再部署新增 API。历史按可信 user_code 和类别隔离；组合主键去重，最近访问组合索引避免列表排序扫描，每人每类最多20条。预部署使用真实 MySQL EXPLAIN 检查该索引且无 filesort，回滚验证数据。
+搜索历史 DDL：`backend/sql/003-search-history.sql`。现有 Railway 库在模拟服务预部署时自动建此新表并授予单表权限，不清空已有数据。正式库需先执行此脚本并授权，再部署新增 API。历史按可信 user_code 和类别隔离；组合主键去重，最近记录组合索引支持用户、类别定位和有序读取，每人每类最多20条。预部署检查实际索引列及排序方向，记录真实 MySQL EXPLAIN，并回滚验证数据；小数据量下允许优化器选用主键。
 
 - `report_metadata.fine_entry_id` 与 tree 的入口 ID 关联，`report_id` 仅作元数据主键。BI 的发布任务 ID 取自平台，不与前两者混用。
 - Hive 日访问聚合由 ETL 同步至 MySQL `dim_bi_visit_log`。按可信 `user_code` 求 `SUM(visit_num)`；常用统计窗口为 `data_as_of` 向前 29 天，包含两端。未来日期不计入。最近访问取截至批次日期的最大访问日。
