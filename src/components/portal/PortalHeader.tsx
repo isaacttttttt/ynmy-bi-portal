@@ -1,133 +1,28 @@
 "use client";
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { Search, BookOpen, ArrowLeft, X, LayoutGrid, List } from 'lucide-react';
+import { demoMode } from '@/lib/portal-api';
+import { DisplayModeSwitch } from './PortalViewport';
 
-import { useState } from "react";
-import { Search, BookOpen, Grid3x3, List } from "lucide-react";
-import Image from "next/image";
-
-interface PortalHeaderProps {
-  title: string;
-  subtitle: string;
-  onSearch: (keyword: string) => void;
-  showViewToggle?: boolean;
-  viewMode?: "grid" | "list";
-  onViewModeChange?: (mode: "grid" | "list") => void;
-  onNavigateToDictionary?: () => void;
-  onNavigateToHome?: () => void;
-}
-
-export default function PortalHeader({
-  title,
-  subtitle,
-  onSearch,
-  showViewToggle = false,
-  viewMode = "grid",
-  onViewModeChange,
-  onNavigateToDictionary,
-  onNavigateToHome
-}: PortalHeaderProps) {
-  const [searchInput, setSearchInput] = useState("");
-
-  const handleSearch = () => {
-    onSearch(searchInput);
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleSearch();
-    }
-  };
-
-  const handleLogoClick = () => {
-    if (onNavigateToHome) {
-      onNavigateToHome();
-    }
-  };
-
-  return (
-    <header className="h-[136px] flex flex-col justify-between py-5">
-      {/* 顶部品牌区 */}
-      <div className="flex items-center">
-        <div
-          className="flex items-center cursor-pointer"
-          onClick={handleLogoClick}
-        >
-          <Image
-            src="/assets/company_title.png"
-            alt="云南白药"
-            width={48}
-            height={48}
-            className="object-contain"
-          />
-          <div className="h-7 w-[1px] bg-slate-300 mx-4" />
-          <div>
-            <h1 className="text-[22px] font-bold text-[#1D2129] tracking-wide">
-              {title}
-            </h1>
-            <p className="text-[12px] text-[#4E5969] tracking-[0.25em] mt-1">
-              {subtitle}
-            </p>
-          </div>
-        </div>
+export default function PortalHeader({ dictionary = false, query = '', onSearch, view, onViewChange }: { dictionary?: boolean; query?: string; onSearch: (q: string) => void; view?: 'grid' | 'list'; onViewChange?: (view: 'grid' | 'list') => void }) {
+  const [input, setInput] = useState(query);
+  useEffect(() => setInput(query), [query]);
+  return <header className="portal-header">
+    <div className="brand-row">
+      <Link href="/" className="brand-logo" aria-label="云南白药数据门户首页"><img src="/assets/company_title.png" alt="云南白药 YUNNANBAIYAO" /></Link>
+      <div className="brand-copy"><h1>{dictionary ? '数据门户 · 报表字典' : '云南白药集团 · 数据门户'}</h1>{!dictionary && <p>数据驱动经营 · 智慧赋能决策</p>}</div>
+      <div className="header-tools"><DisplayModeSwitch /><span className="environment-label">{demoMode ? '演示环境 · 示例数据' : '企业数据门户'}</span>
+        {dictionary && <Link href="/" className="home-link"><ArrowLeft size={14} />返回首页</Link>}
       </div>
-
-      {/* 搜索栏与按钮 */}
-      <div className="flex items-center justify-center gap-3">
-        {/* 搜索框 */}
-        <div
-          className="relative flex items-center bg-white rounded-full shadow-[0_4px_16px_rgba(29,99,255,0.08)]"
-          style={{ width: "520px", height: "44px" }}
-        >
-          <Search className="absolute left-4 w-5 h-5 text-[#86909C]" />
-          <input
-            type="text"
-            placeholder="输入报表名称，回车检索"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            className="flex-1 px-12 text-[14px] text-[#1D2129] placeholder:text-[#86909C] bg-transparent outline-none"
-          />
-          <button
-            onClick={handleSearch}
-            className="mr-1 px-6 h-[36px] bg-gradient-to-r from-[#2B72FF] to-[#1D63FF] text-white text-[14px] font-medium rounded-full hover:shadow-md transition-all"
-          >
-            搜索
-          </button>
-        </div>
-
-        {/* 报表字典按钮或视图切换 */}
-        {!showViewToggle ? (
-          <button
-            onClick={onNavigateToDictionary}
-            className="flex items-center gap-2 h-[44px] px-5 bg-white text-[#1D2129] font-medium rounded-full shadow-sm hover:text-[#1D63FF] transition-colors"
-          >
-            <BookOpen className="w-4 h-4" />
-            报表字典
-          </button>
-        ) : (
-          <div className="flex items-center gap-1 h-[44px] bg-white rounded-full p-1 shadow-sm">
-            <button
-              onClick={() => onViewModeChange?.("grid")}
-              className={`flex items-center justify-center w-10 h-10 rounded-full transition-all ${
-                viewMode === "grid"
-                  ? "bg-white text-[#1D63FF] shadow-sm"
-                  : "text-[#86909C] hover:text-[#1D2129]"
-              }`}
-            >
-              <Grid3x3 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => onViewModeChange?.("list")}
-              className={`flex items-center justify-center w-10 h-10 rounded-full transition-all ${
-                viewMode === "list"
-                  ? "bg-white text-[#1D63FF] shadow-sm"
-                  : "text-[#86909C] hover:text-[#1D2129]"
-              }`}
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-      </div>
-    </header>
-  );
+    </div>
+    <div className="search-row">
+      <form className="portal-search" onSubmit={e => { e.preventDefault(); onSearch(input.trim()); }}>
+        <Search size={20} aria-hidden="true" /><input aria-label="搜索报表" placeholder="搜索报表名称、指标、Owner、数据源…" value={input} onChange={e => setInput(e.target.value)} />
+        {input && <button className="icon-button" type="button" aria-label="清空搜索" onClick={() => { setInput(''); onSearch(''); }}><X size={16} /></button>}
+        <button type="submit" className="search-submit"><Search size={21} />搜索</button>
+      </form>
+      {dictionary ? <div className="segmented view-toggle" role="group" aria-label="视图切换"><button aria-label="卡片视图" aria-pressed={view === 'grid'} className={view === 'grid' ? 'active' : ''} onClick={() => onViewChange?.('grid')}><LayoutGrid size={22} /></button><button aria-label="列表视图" aria-pressed={view === 'list'} className={view === 'list' ? 'active' : ''} onClick={() => onViewChange?.('list')}><List size={22} /></button></div> : <Link href="/report-dictionary/" className="dictionary-link"><BookOpen size={20} />报表字典</Link>}
+    </div>
+  </header>;
 }

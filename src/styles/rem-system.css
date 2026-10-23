@@ -1,0 +1,227 @@
+/**
+ * REM 自适应系统
+ * 基于 clamp() 和 CSS 变量实现流式布局
+ * 参考: categoryview_0521 项目
+ */
+
+/* ============================================
+   1. 基础 REM 设置
+   ============================================ */
+
+/*
+  设计基准: 1920px
+  基础字号: 16px
+  使用 clamp() 实现响应式根字号
+  clamp(最小值, 理想值, 最大值)
+*/
+html {
+  /* 根字号响应式计算 */
+  font-size: clamp(12px, 0.833vw, 16px);
+
+  /* 在小屏幕上调整 */
+  @media (max-width: 1280px) {
+    font-size: clamp(10px, 0.781vw, 14px);
+  }
+
+  /* 在大屏幕上调整 */
+  @media (min-width: 2560px) {
+    font-size: clamp(16px, 0.625vw, 18px);
+  }
+}
+
+body {
+  font-size: 1rem; /* 继承根字号 */
+}
+
+/* ============================================
+   2. CSS 变量定义 (Fluid Spacing)
+   ============================================ */
+
+:root {
+  /* 页面边距 */
+  --spacing-page-x: clamp(1rem, 1.25vw, 1.5rem);        /* 24px */
+  --spacing-page-y: clamp(1.25rem, 1.667vw, 2rem);      /* 32px */
+
+  /* 模块间距 */
+  --spacing-module: clamp(0.875rem, 1.042vw, 1.25rem);  /* 20px */
+  --spacing-card: clamp(0.625rem, 0.833vw, 1rem);       /* 16px */
+  --spacing-item: clamp(0.5rem, 0.625vw, 0.75rem);      /* 12px */
+  --spacing-compact: clamp(0.313rem, 0.417vw, 0.5rem);  /* 8px */
+
+  /* 容器尺寸 */
+  --container-max: 90rem;                                 /* 1440px */
+  --workbench-h: clamp(22rem, 23.958vw, 28.75rem);      /* 460px */
+  --thematic-h: clamp(15rem, 16.719vw, 20.063rem);      /* 321px */
+  --notice-h: clamp(18rem, 20.365vw, 24.438rem);        /* 391px */
+  --quickentry-h: clamp(18rem, 20.313vw, 24.375rem);    /* 390px */
+
+  /* 卡片尺寸 */
+  --card-report-h: clamp(7rem, 9.375vw, 9.25rem);       /* 148px */
+  --card-horizontal-h: clamp(4.5rem, 5.729vw, 6rem);    /* 96px */
+
+  /* 字体大小 */
+  --font-xxs: clamp(0.625rem, 0.573vw, 0.688rem);      /* 11px */
+  --font-xs: clamp(0.688rem, 0.625vw, 0.75rem);        /* 12px */
+  --font-sm: clamp(0.75rem, 0.677vw, 0.813rem);        /* 13px */
+  --font-base: clamp(0.813rem, 0.781vw, 0.938rem);     /* 15px */
+  --font-md: clamp(0.875rem, 0.833vw, 1rem);           /* 16px */
+  --font-lg: clamp(0.938rem, 0.885vw, 1.063rem);       /* 17px */
+  --font-xl: clamp(1.125rem, 1.146vw, 1.375rem);       /* 22px */
+
+  /* 图标尺寸 */
+  --icon-xs: clamp(0.875rem, 1.042vw, 1.25rem);        /* 20px */
+  --icon-sm: clamp(1.25rem, 1.458vw, 1.75rem);         /* 28px */
+  --icon-md: clamp(1.75rem, 1.875vw, 2.25rem);         /* 36px */
+  --icon-lg: clamp(2rem, 2.083vw, 2.5rem);             /* 40px */
+  --icon-xl: clamp(2.5rem, 2.708vw, 3.25rem);          /* 52px */
+
+  /* 圆角 */
+  --radius-sm: clamp(0.375rem, 0.417vw, 0.5rem);       /* 8px */
+  --radius-md: clamp(0.625rem, 0.625vw, 0.75rem);      /* 12px */
+  --radius-lg: clamp(0.875rem, 0.833vw, 1rem);         /* 16px */
+  --radius-xl: clamp(1rem, 1.042vw, 1.25rem);          /* 20px */
+  --radius-full: 9999px;
+
+  /* 设计配色 */
+  --color-primary: #1D63FF;
+  --color-text-primary: #1D2129;
+  --color-text-secondary: #4E5969;
+  --color-text-tertiary: #86909C;
+  --color-bg-page: #EDF3FA;
+  --color-bg-module: rgba(255, 255, 255, 0.88);
+  --color-border-light: rgba(255, 255, 255, 0.9);
+
+  /* 阴影 */
+  --shadow-sm: 0 2px 8px -2px rgba(29, 99, 255, 0.04);
+  --shadow-md: 0 8px 24px -4px rgba(29, 99, 255, 0.05);
+  --shadow-lg: 0 12px 32px -6px rgba(29, 99, 255, 0.08);
+}
+
+/* ============================================
+   3. 实用工具类
+   ============================================ */
+
+/* 容器类 */
+.container-fluid {
+  width: 100%;
+  max-width: var(--container-max);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--spacing-page-x);
+  padding-right: var(--spacing-page-x);
+}
+
+/* 间距类 */
+.gap-module { gap: var(--spacing-module); }
+.gap-card { gap: var(--spacing-card); }
+.gap-item { gap: var(--spacing-item); }
+.gap-compact { gap: var(--spacing-compact); }
+
+.p-module { padding: var(--spacing-module); }
+.p-card { padding: var(--spacing-card); }
+
+.mb-module { margin-bottom: var(--spacing-module); }
+.mb-card { margin-bottom: var(--spacing-card); }
+.mb-item { margin-bottom: var(--spacing-item); }
+
+/* 字体类 */
+.text-xxs { font-size: var(--font-xxs); }
+.text-xs { font-size: var(--font-xs); }
+.text-sm { font-size: var(--font-sm); }
+.text-base { font-size: var(--font-base); }
+.text-md { font-size: var(--font-md); }
+.text-lg { font-size: var(--font-lg); }
+.text-xl { font-size: var(--font-xl); }
+
+/* 圆角类 */
+.rounded-sm { border-radius: var(--radius-sm); }
+.rounded-md { border-radius: var(--radius-md); }
+.rounded-lg { border-radius: var(--radius-lg); }
+.rounded-xl { border-radius: var(--radius-xl); }
+.rounded-full { border-radius: var(--radius-full); }
+
+/* 模块容器 */
+.module-card {
+  background: var(--color-bg-module);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--spacing-module);
+}
+
+/* Flexbox 布局增强 */
+.flex-responsive {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-card);
+}
+
+.flex-col-responsive {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-module);
+}
+
+/* ============================================
+   4. 响应式断点
+   ============================================ */
+
+/* 超大屏 */
+@media (min-width: 2560px) {
+  :root {
+    --spacing-page-x: 2rem;
+    --spacing-module: 1.5rem;
+  }
+}
+
+/* 标准屏 */
+@media (min-width: 1920px) and (max-width: 2559px) {
+  /* 默认值，无需覆盖 */
+}
+
+/* 中等屏 */
+@media (min-width: 1440px) and (max-width: 1919px) {
+  :root {
+    --spacing-page-x: 1.25rem;
+    --spacing-module: 1rem;
+  }
+}
+
+/* 小屏 */
+@media (max-width: 1439px) {
+  :root {
+    --spacing-page-x: 1rem;
+    --spacing-module: 0.875rem;
+    --spacing-card: 0.75rem;
+  }
+}
+
+/* 移动端 */
+@media (max-width: 768px) {
+  :root {
+    --spacing-page-x: 0.75rem;
+    --spacing-module: 0.625rem;
+    --spacing-card: 0.5rem;
+  }
+
+  .flex-responsive {
+    flex-direction: column;
+  }
+}
+
+/* ============================================
+   5. 打印样式
+   ============================================ */
+
+@media print {
+  html {
+    font-size: 12pt;
+  }
+
+  .module-card {
+    box-shadow: none;
+    backdrop-filter: none;
+    border: 1px solid #ddd;
+  }
+}

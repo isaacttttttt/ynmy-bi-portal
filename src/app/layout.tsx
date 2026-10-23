@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import { ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
+import { PortalProvider } from "@/components/portal/PortalProvider";
+import PortalViewport from "@/components/portal/PortalViewport";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "云南白药集团 · 数据门户",
   description: "数据驱动经营 · 智慧赋能决策",
+  icons: { icon: '/assets/icon_blue.png' },
 };
 
 export default function RootLayout({
@@ -40,7 +43,7 @@ export default function RootLayout({
             },
           }}
         >
-          {children}
+          <PortalViewport><PortalProvider>{children}</PortalProvider></PortalViewport>
         </ConfigProvider>
       </body>
     </html>

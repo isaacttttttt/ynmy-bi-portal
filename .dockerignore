@@ -1,0 +1,12 @@
+node_modules
+backend/node_modules
+.git
+.next
+out
+artifacts
+ssh
+.ssh
+.railway
+**/.env*
+**/*.log
+.claude

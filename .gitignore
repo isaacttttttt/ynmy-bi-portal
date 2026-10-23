@@ -8,6 +8,7 @@
 
 # testing
 /coverage
+/artifacts/qa/
 
 # next.js
 /.next/
@@ -28,6 +29,10 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+ssh/
+.ssh/
+.railway/
+backend/node_modules/
 
 # vercel
 .vercel

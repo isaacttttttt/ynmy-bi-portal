@@ -22,7 +22,7 @@ export default function Header({ searchKeyword, onSearchChange }: HeaderProps) {
             animate={{ opacity: 1, x: 0 }}
             className="flex items-center gap-4"
           >
-            <div className="relative w-[120px] h-[60px]">
+            <div className="relative w-[120px] h-[80px]">
               <Image
                 src="/assets/logo.png"
                 alt="云南白药"

@@ -1,372 +1,161 @@
-# API 接口文档
+# 数据门户接口契约 v1
 
-## 基础信息
+本契约已由 `backend/src/app.js` 实现，并用于 Railway 测试部署。原有 `/api/reports` 等旧原型路由不再注册。当前连接 MySQL 示例底表和独立帆软模拟服务；真实底表、真实帆软会话仍需联调。部署、数据库适配和验收方法见 [后端交接](BACKEND_HANDOFF.md)。
 
-**Base URL**: `http://localhost:3000/api`
+## 接入约定
 
-**响应格式**: JSON
+- 基础路径：`/api/portal/v1`，通过 `NEXT_PUBLIC_PORTAL_API_BASE` 指定。
+- 前端静态导出，由帆软页面以 iframe 嵌入。推荐门户、BFF、帆软通过反向代理同源部署。
+- `NEXT_PUBLIC_PORTAL_MODE=demo` 使用浏览器内模拟接口；`api` 使用真实 HTTP。真实接口失败时显示错误，绝不降级为演示数据。
+- 身份来自服务端验证的当前平台会话。请求使用 `credentials: include`，不接收浏览器自报的 `userId` 或权限集合。不把平台 token 写入 URL、localStorage 或日志。
+- 写请求须由 BFF 校验同源 Origin / CSRF，CORS 不得使用通配来源并允许携带凭据。
+- ID 均为字符串：`Entry.id` 是帆软目录/模板入口 ID；`Report.metadataId` 是底表自增主键，不能混用。BI 的 `templateId` 是发布任务 ID，不是入口 ID。
+- 日期使用 `YYYY-MM-DD`，精确时间若以后提供则使用带时区的 ISO 8601。业务日期以 Asia/Shanghai 计算。不存在的日期返回 `null`，不可伪造时间。
+- 所有响应 `Cache-Control: private, no-store`。不要跨用户复用权限数据缓存。
+- 前端只在当前页面会话内缓存列表，首次读取后每10分钟静默刷新当前数据；工作台三类列表一并缓存，切换 Tab 不发请求。临时网络错误保留最后一次成功结果，401/403 清除对应缓存并显示错误。浏览器缓存不替代服务端鉴权。
 
-**字符编码**: UTF-8
+成功响应：
 
-## 通用响应格式
-
-### 成功响应
 ```json
-{
-  "success": true,
-  "data": { ... }
-}
+{"success":true,"data":{"items":[],"total":0,"page":1,"pageSize":6}}
 ```
 
-### 失败响应
+失败响应：
+
 ```json
-{
-  "success": false,
-  "message": "错误描述",
-  "error": "详细错误信息"
-}
+{"success":false,"error":{"code":"SESSION_EXPIRED","message":"登录已过期，请重新登录"},"requestId":"trace-id"}
 ```
 
-### 分页响应
-```json
-{
-  "success": true,
-  "data": [...],
-  "pagination": {
-    "page": 1,
-    "pageSize": 20,
-    "total": 100
-  }
-}
-```
+HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不存在（也可统一隐藏无权资源）；502 帆软上游失败；503 底表服务不可用。不要返回 SQL、堆栈或凭据。前端显示可读错误与重试入口。
 
-## 1. 报表相关接口
+## 权限处理顺序
 
-### 1.1 获取报表字典列表
+每次请求先验证会话，由 BFF 以当前用户身份调用 `/v10/view/entry/tree`。失败时拒绝请求，不能使用全量目录或管理员身份回退。
 
-**接口**: `GET /api/reports/dictionary`
+1. 基于 tree 的实际返回项构造可见入口 ID 集合。拿到目录本身不等于得到所有未返回子项的权限。
+2. 报表字典、最近、常用、收藏与此集合取交集。专题仅返回配置的 `rootId` 下已授权的所有层级。权限集合必须来自完整授权树，不能只用专题子树过滤全站公告和字典。
+3. 公告解析 `notice_region_id` 的逗号分隔 ID，去空白后做精确集合匹配；命中任一可见 ID 才可见。禁止子串匹配。未配置权限范围默认不公开；如需全员公告，增加明确的全员标记。
+4. 公告同时检查生效时间、过期时间；置顶不绕过权限和有效期。日期边界需使用上海业务日，结束日当天包含在内。
+5. 搜索、筛选计数、排序、总数、分页均在权限过滤之后进行，避免通过数量或分页泄露无权数据。单条打开、收藏写入也必须重新鉴权。
 
-**描述**: 获取报表字典列表，支持多维度筛选和分页
+## GET /bootstrap
 
-**请求参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| page | number | 否 | 页码，默认1 |
-| pageSize | number | 否 | 每页数量，默认20 |
-| keyword | string | 否 | 搜索关键词 |
-| module | string | 否 | 业务模块 |
-| status | number | 否 | 报表状态：1-在用，0-已归档 |
-| updateFrequency | string | 否 | 更新频率：实时/T+1/周/月 |
+返回登录上下文、专题授权树、收藏 ID、启用的快捷入口与数据日期。树是扁平结构，父子关系用 ID，不能按名称或拼接路径关联。树中可包含模板尚无元数据的条目，专题仍可显示；字典只显示成功关联元数据的条目。
 
-**响应示例**:
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "1",
-      "name": "终端数据面板",
-      "iconId": "icon_001",
-      "path": "/reports/terminal-data",
-      "description": "核心销售数据驾驶舱",
-      "module": "临床经验",
-      "ownerName": "张三",
-      "updateFrequency": "实时",
-      "totalViews": 1250,
-      "coreMetrics": ["终端销售", "数据质量"],
-      "status": 1
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "pageSize": 20,
-    "total": 100
-  }
-}
-```
-
-### 1.2 获取报表详情
-
-**接口**: `GET /api/reports/:id`
-
-**描述**: 根据报表ID获取详细信息
-
-**路径参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| id | string | 是 | 报表ID |
-
-**响应示例**:
 ```json
 {
   "success": true,
   "data": {
-    "id": "1",
-    "name": "终端数据面板",
-    "description": "核心销售数据驾驶舱",
-    "module": "临床经验",
-    "ownerName": "张三",
-    "ownerDept": "销售部",
-    "devOwnerName": "李四",
-    "devOwnerDept": "IT部",
-    "sourceSystem": "SAP,CRM",
-    "coreMetrics": ["终端销售", "数据质量", "商业库存"],
-    "calcLogic": "计算逻辑说明...",
-    "updateFrequency": "实时",
-    "status": 1,
-    "onlineDate": "2024-01-01",
-    "lastUpdatedAt": "2024-10-20",
-    "totalViews": 1250
+    "user": {"name":"当前用户"},
+    "rootId":"configured-top-directory-id",
+    "dataAsOf":"2026-10-22",
+    "favoriteIds":["entry-123"],
+    "entries":[
+      {"id":"health","parentId":"configured-top-directory-id","name":"健康品事业群","type":"folder","sort":0},
+      {"id":"entry-123","parentId":"health","name":"经营分析","type":"bi","templateId":"publish-task-id","sort":1}
+    ],
+    "quickEntries":[{"id":"help","name":"BI帮助文档","description":"平台操作与使用指南","url":"https://help.fanruan.com/finebi"}]
   }
 }
 ```
 
-### 1.3 增加报表访问次数
+`Entry.type` 枚举：`folder | bi | fvs | frm | cpt | url`。`iconUrl` 可选，提供 HTTPS 图片地址。`url` 类型必须提供 `url`。图标请求失败使用类型默认切图。`sort` 数值升序，事业群默认选择根目录下排序第一的文件夹；目录为空显示空态，不伪造事业群。
 
-**接口**: `POST /api/reports/:id/view`
+快捷入口 `url:null` 表示尚未配置，前端显示“待配置”，不链接到不存在的本地页面。只接受 HTTP(S)；内网站点相对路径按门户同源解析。BFF 应校验业务允许的链接来源。
 
-**描述**: 记录用户访问报表，增加访问计数
+## GET /reports
 
-**路径参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| id | string | 是 | 报表ID |
+| 参数 | 类型 / 默认值 | 规则 |
+| --- | --- | --- |
+| q | string / 空 | 去前后空格，最多200字符；检索名称、描述、指标、Owner、数据源；英文忽略大小写 |
+| module | 重复 query 参数 | 业务模块，如 `module=供应链&module=财务管理` |
+| status | 重复 query 参数 | `active`、`archived` |
+| frequency | 重复 query 参数 | `实时`、`T+1`、`周更新`、`月更新`；底表其他值须规范化 |
+| volume | 重复 query 参数 | `high`：>1000，`medium`：100–1000，`low`：<100；均为累计访问量 |
+| page | 正整数 / 1 | 非整数、负数返回400 |
+| pageSize | 正整数 / 6 | 1–100 |
 
-**响应示例**:
+同组多选 OR，组间 AND；空数组表示不限。默认无筛选。默认按元数据 `sort_no`、`metadataId` 稳定排序。切换搜索或筛选，前端重置第一页；搜索和筛选保存在 URL，支持刷新和浏览器前后退。
+
+`data` 包含 `items: Report[]`、`total`、`page`、`pageSize`、`facets`。`facets` 的四个键与筛选键相同，每组是 `{value:string,count:number}[]`。计数应用关键词和其他组条件，忽略本组条件，保留计数为0的可见选项。总数计算应用所有条件。
+
+Report 示例（卡片和详情使用同一对象，避免底表未就绪时增加空的详情接口）：
+
 ```json
 {
-  "success": true,
-  "message": "访问次数已更新"
+  "id":"entry-123","metadataId":"1001","parentId":"health","name":"经营分析",
+  "type":"bi","templateId":"publish-task-id","sort":1,
+  "description":"报表介绍","module":"运营","department":"经营管理部",
+  "owner":"业务负责人","developer":"开发负责人","frequency":"T+1","status":"active",
+  "source":"ERP + 财务系统","metrics":["销售额","达成率"],
+  "views":1000,"visits30d":12,"lastVisitedOn":"2026-10-22",
+  "useScene":"经营例会","calcLogic":"底表维护的计算口径","updatedOn":"2026-10-22"
 }
 ```
 
-## 2. 工作台相关接口
+归档报表可以查元数据，但前端禁止打开，服务端也须遵循同一规则。没有正式口径的字段返回空字符串，前端显示“暂未维护”；禁止自动生成业务口径。
 
-### 2.1 获取最近打开
+## GET /workbench
 
-**接口**: `GET /api/workbench/recent`
+参数：`tab=recent|frequent|favorites`、`page=1`、`pageSize=8`（默认，允许1–100）。返回 `Page<Report>`，不带 facets。当前前端每批请求100条，按返回的 `pageSize` 继续读取后续页，合并三类完整列表后更新缓存；界面使用内部滚动，不显示工作台分页。
 
-**描述**: 获取用户最近打开的报表列表
+- recent：当前用户、在用且有权限的报表；按最近访问日降序，日期相同时用入口 ID 稳定排序。
+- frequent：当前用户近30个自然日的访问量降序；以 `SUM(visit_num)` 聚合，不能 `COUNT(*)` 数日汇总行数。必须注明数据截止日。
+- favorites：平台收藏列表与权限、在用报表取交集。缺少元数据的收藏需要底表补齐后才能进入当前工作台；专题收藏仍然以平台入口 ID 保存。
 
-**请求参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| userId | string | 是 | 用户ID |
-| page | number | 否 | 页码，默认1 |
-| pageSize | number | 否 | 每页数量，默认20 |
+当前底表只有日粒度，前端展示访问日期，不显示“几小时前”。若以后要展示分钟级，ETL 必须保留真实 `last_visited_at`。
 
-**响应示例**:
+## PUT /favorites/:entryId
+
 ```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "1",
-      "name": "集团经营分析总览驾驶舱",
-      "type": "dashboard",
-      "iconId": "icon_001",
-      "module": "财务管理",
-      "lastOpenTime": "2024-10-21",
-      "visitCount": 15
-    }
-  ]
-}
+{"favorite":true}
 ```
 
-### 2.2 获取常用报表
+成功 `data`：`{"id":"entry-123","favorite":true,"report":{...}}`。`report` 是当前授权报表的完整 `Report` 对象；入口没有报表元数据时返回 `null`。它用于立即更新“我收藏的”缓存，无需再读取工作台。前端只在服务端确认后修改状态，失败保留原值；请求期间锁定该入口的收藏按钮。首页、专题、字典共享状态。该契约是设置目标状态，BFF 应使重复请求幂等。
 
-**接口**: `GET /api/workbench/frequent`
+参考工程确认的上游调用：
 
-**描述**: 获取用户常用报表（访问次数>=3）
+- 列表：`GET /v10/favorite/entry/list`
+- 添加：`POST /v10/favorite/entry/:id`
+- 取消：`POST /v10/favorite/entry/:id?fakeMethod=DELETE`
+- 示例成功标记：响应 `data === "success"`。上线时仍须核对部署版本，不能只以 HTTP 200 判断成功。
 
-**请求参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| userId | string | 是 | 用户ID |
-| page | number | 否 | 页码，默认1 |
-| pageSize | number | 否 | 每页数量，默认20 |
+收藏也建议通过 BFF 适配平台差异；浏览器不直接读取父窗口的 `fine_auth_token`。只有演示收藏使用 `ynby.portal.demo.favorites.v1` 本地存储，与正式平台完全隔离。
 
-**响应示例**:
+## GET /notices
+
+参数 `page`、`pageSize`（首页5，全部公告10）；返回 `Page<Notice>`。
+
 ```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "2",
-      "name": "财务共享中心月度报表",
-      "type": "report",
-      "iconId": "icon_002",
-      "module": "财务管理",
-      "visitCount": 25,
-      "lastOpenTime": "2024-10-20"
-    }
-  ]
-}
+{"id":"notice-123","title":"标题","category":"通知","pinned":true,"publishedOn":"2026-10-22","content":"正文纯文本","url":"https://example.internal/notice"}
 ```
 
-### 2.3 获取收藏报表
+先按权限和有效期筛选，再按置顶降序、发布日期降序、ID升序排序。正文按纯文本换行渲染，不使用 `dangerouslySetInnerHTML`。若业务要求富文本，须另外明确清洗规范。列表已包含正文，详情弹窗不发送无鉴权的旁路请求。
 
-**接口**: `GET /api/workbench/favorite`
+## 平台打开接口
 
-**描述**: 获取用户收藏的报表列表
+根据 `categoryview_0521/src/app/page.js` 中的实际调用封装在 `src/lib/portal-api.ts`：
 
-**请求参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| userId | string | 是 | 用户ID |
+| 类型 | 打开方式 |
+| --- | --- |
+| bi | `window.top.BI.Services.getService('dec.service.frame.tab_pane').openCustomTab(name,id,'bi.subject.publink',{subjectEntryType:2,publishTaskId:templateId,entryId:id,hideType:'display'})` |
+| frm / fvs / cpt | `window.top.FS.tabPane.addItem({title:name,src:FINE_BASE+'/v10/entry/access/'+encodeURIComponent(id)})` |
+| url | `window.top.FS.tabPane.addItem({title:name,src:validatedUrl})` |
+| folder | 门户内按 parentId 下钻 |
 
-**响应示例**:
-```json
-{
-  "success": true,
-  "data": [],
-  "message": "需要对接帆软平台收藏接口"
-}
-```
+同源读取父窗口失败、平台 API 缺失或 BI 发布任务 ID 缺失时显示错误，不能宣称已打开。跨域 iframe 不能直接调用 `window.top` 的平台对象；若必须跨域，需要由平台方提供有来源校验的桥接协议后再实现，不使用 `postMessage('*')` 猜测协议。平台打开仍需平台自身鉴权。
 
-## 3. 公告相关接口
+## 与底表同事的交接
 
-### 3.1 获取公告列表
+| 当前设计问题 | 需要提供或确认 |
+| --- | --- |
+| `report_metadata.report_id` 是自增数字，平台入口 ID 是字符串 | 增加唯一 `fine_entry_id` / 关联表；`permission_code` 只有明确等同入口 ID 时才能用；开发路径不能当稳定主键 |
+| BI 发布任务 ID 不在元数据表中 | 由 tree 的 `templateId` 传递，不使用 `report_id` 代替 |
+| `dim_bi_visit_log` 为日汇总、只有 `visit_num` | SUM聚合访问量，最近只展示日粒度；近30日统计需至少30日可查询历史（示例 lifecycle 3 不足） |
+| DDL 名称 `dim_bi_visit_log` 与 INSERT 的 `dim_bi_visit_log_inc` 不同 | 确定最终服务表名、刷新日期、粒度与迟到数据处理方式 |
+| 日志和目录 DDL 是 ORC/Hive，后端计划 mysql2 | 提供 MySQL 服务层同步表/视图或明确查询服务，mysql2 不能直接查询 ORC |
+| 快捷入口索引引用未定义的 `is_deleted` | 补字段或移除索引项，启用状态与逻辑删除规则一致 |
+| `collect_list` 生成路径的顺序不稳定 | 按目录深度重建有序路径；前端仍以 ID 父子关系为准 |
+| 公告权限是逗号字符串，日期也是字符串 | 精确拆分 ID；统一日期格式、空范围默认不公开，确认是否需要全员标记 |
 
-**接口**: `GET /api/notices`
-
-**描述**: 获取制度公告列表
-
-**请求参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| page | number | 否 | 页码，默认1 |
-| pageSize | number | 否 | 每页数量，默认10 |
-| isTop | string | 否 | 是否置顶：1-是，0-否 |
-
-**响应示例**:
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "uuid-001",
-      "title": "云南白药集团数据门户管理办法（试行）",
-      "category": "管理办法",
-      "isTop": "1",
-      "startDate": "2024-09-01",
-      "expiryDate": "2025-12-31",
-      "content": "公告内容...",
-      "hasHyperlink": "0",
-      "hyperlink": null,
-      "registeredBy": "admin",
-      "registerDate": "2024-09-01"
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "pageSize": 10,
-    "total": 50
-  }
-}
-```
-
-### 3.2 获取公告详情
-
-**接口**: `GET /api/notices/:id`
-
-**描述**: 根据公告ID获取详细信息
-
-**路径参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| id | string | 是 | 公告UUID |
-
-**响应示例**:
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid-001",
-    "title": "云南白药集团数据门户管理办法（试行）",
-    "category": "管理办法",
-    "isTop": "1",
-    "content": "详细公告内容...",
-    "startDate": "2024-09-01",
-    "expiryDate": "2025-12-31",
-    "hasHyperlink": "1",
-    "hyperlink": "http://example.com/doc.pdf",
-    "regionIds": "1,2,3",
-    "regionDesc": "财务部,销售部,IT部"
-  }
-}
-```
-
-## 4. 快捷入口相关接口
-
-### 4.1 获取快捷入口列表
-
-**接口**: `GET /api/quick-entries`
-
-**描述**: 获取所有启用的快捷入口
-
-**响应示例**:
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "name": "问题反馈",
-      "description": "使用问题反馈入口",
-      "url": "http://feedback.example.com",
-      "iconUrl": "/assets/icons/feedback.png",
-      "sortNo": 1,
-      "status": 1
-    }
-  ]
-}
-```
-
-### 4.2 获取快捷入口详情
-
-**接口**: `GET /api/quick-entries/:id`
-
-**描述**: 根据ID获取快捷入口详情
-
-**路径参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| id | number | 是 | 快捷入口ID |
-
-**响应示例**:
-```json
-{
-  "success": true,
-  "data": {
-    "id": 1,
-    "name": "问题反馈",
-    "description": "使用问题反馈入口",
-    "url": "http://feedback.example.com",
-    "iconUrl": "/assets/icons/feedback.png",
-    "sortNo": 1,
-    "status": 1,
-    "createdAt": "2024-01-01T00:00:00Z",
-    "updatedAt": "2024-10-01T00:00:00Z"
-  }
-}
-```
-
-## 错误码说明
-
-| HTTP状态码 | 说明 |
-|-----------|------|
-| 200 | 请求成功 |
-| 400 | 请求参数错误 |
-| 401 | 未授权 |
-| 403 | 禁止访问 |
-| 404 | 资源不存在 |
-| 500 | 服务器内部错误 |
-
-## 注意事项
-
-1. 所有接口均需通过帆软平台的身份认证
-2. 接口响应时间目标：< 500ms
-3. 数据库查询使用索引优化性能
-4. 大数据量查询建议使用分页
-5. 建议前端做好错误处理和重试机制
+实时权限始终从帆软当前用户树获取；T+1 元数据、访问日志不得作为权限依据。

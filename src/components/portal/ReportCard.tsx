@@ -2,7 +2,7 @@
 
 import { Clock } from "lucide-react";
 import Image from "next/image";
-import { RESPONSIVE_SIZES } from "@/lib/responsive";
+import { pxToRem, REM_SIZES } from "@/lib/rem";
 
 export type CardTheme = "blue" | "teal" | "purple" | "orange";
 
@@ -62,22 +62,15 @@ export default function ReportCard({
     <div
       className="p-4 flex flex-col justify-between cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-md"
       style={{
-        width: RESPONSIVE_SIZES.reportCard.width,
-        height: RESPONSIVE_SIZES.reportCard.height,
+        height: REM_SIZES.card.reportHeight,
         background: config.background,
         border: `1px solid ${config.border}`,
-        borderRadius: RESPONSIVE_SIZES.borderRadius.md
+        borderRadius: REM_SIZES.card.borderRadius
       }}
     >
       {/* 顶部：图标 + 标签 */}
-      <div className="flex items-start gap-2">
-        <div
-          className="relative flex-shrink-0"
-          style={{
-            width: RESPONSIVE_SIZES.iconSize.md,
-            height: RESPONSIVE_SIZES.iconSize.md
-          }}
-        >
+      <div className="flex items-start" style={{ gap: pxToRem(8) }}>
+        <div className="relative flex-shrink-0" style={{ width: REM_SIZES.icon.md, height: REM_SIZES.icon.md }}>
           <Image
             src={icon}
             alt={title}
@@ -91,7 +84,7 @@ export default function ReportCard({
           style={{
             backgroundColor: config.badgeBg,
             color: config.badgeText,
-            fontSize: RESPONSIVE_SIZES.fontSize.sm
+            fontSize: REM_SIZES.fontSize.sm
           }}
         >
           {category}
@@ -99,16 +92,19 @@ export default function ReportCard({
       </div>
 
       {/* 中部：标题与描述 */}
-      <div className="flex-1 mt-2">
+      <div className="flex-1" style={{ marginTop: pxToRem(8) }}>
         <h3
           className="font-bold text-[#1D2129] leading-tight"
-          style={{ fontSize: RESPONSIVE_SIZES.fontSize.md }}
+          style={{ fontSize: REM_SIZES.fontSize.md }}
         >
           {title}
         </h3>
         <p
-          className="text-[#86909C] truncate mt-1"
-          style={{ fontSize: RESPONSIVE_SIZES.fontSize.sm }}
+          className="text-[#86909C] truncate"
+          style={{
+            fontSize: REM_SIZES.fontSize.sm,
+            marginTop: pxToRem(4)
+          }}
         >
           {subtitle}
         </p>
@@ -116,23 +112,19 @@ export default function ReportCard({
 
       {/* 底部：状态与时间 */}
       <div
-        className="border-t pt-2.5 mt-2 flex justify-between items-center"
-        style={{ borderColor: "rgba(148, 163, 184, 0.15)" }}
+        className="border-t flex justify-between items-center"
+        style={{
+          borderColor: "rgba(148, 163, 184, 0.15)",
+          paddingTop: pxToRem(10),
+          marginTop: pxToRem(8),
+          fontSize: REM_SIZES.fontSize.sm
+        }}
       >
-        <div
-          className="flex items-center gap-1 text-[#86909C]"
-          style={{ fontSize: RESPONSIVE_SIZES.fontSize.sm }}
-        >
-          <Clock className="w-3.5 h-3.5" />
+        <div className="flex items-center text-[#86909C]" style={{ gap: pxToRem(4) }}>
+          <Clock style={{ width: pxToRem(14), height: pxToRem(14) }} />
           <span>{updateLabel}</span>
         </div>
-        <span
-          className="font-medium"
-          style={{
-            color: config.timeColor,
-            fontSize: RESPONSIVE_SIZES.fontSize.sm
-          }}
-        >
+        <span className="font-medium" style={{ color: config.timeColor }}>
           {updateTime}
         </span>
       </div>

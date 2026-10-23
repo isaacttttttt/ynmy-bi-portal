@@ -1,0 +1,14 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>云南白药数据门户 · Railway 测试平台</title>
+<style>*{box-sizing:border-box}body{margin:0;font:14px "Microsoft YaHei",sans-serif;background:#edf4ff;color:#183554}header{min-height:64px;display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid #cee0fa;background:white}strong{margin-right:auto}input,select,button{font:inherit;padding:7px 10px;border:1px solid #c8daee;border-radius:6px}button{cursor:pointer;background:#2575ff;color:white}#status{color:#58728e}iframe{display:block;border:0;width:100%;height:calc(100vh - 64px)}#preview{position:fixed;inset:70px 30px 25px;background:white;border:1px solid #c8daee;border-radius:12px;box-shadow:0 6px 30px #1235}#preview[hidden]{display:none}#preview button{position:absolute;right:15px;top:10px}#preview iframe{height:100%;padding-top:40px}input{width:200px}</style>
+<header><strong>Railway 测试平台 · 全部为示例数据</strong><label>测试访问码 <input id="key" type="password" autocomplete="off"></label><select id="user" aria-label="测试账号"><option value="admin">综合测试用户</option><option value="clinical">临床受限用户</option><option value="empty">无目录权限用户</option></select><button id="login">登录并打开门户</button><button id="logout">退出</button><span id="status" role="status">请输入测试访问码</span></header>
+<iframe id="portal" title="数据门户"></iframe><section id="preview" hidden><button id="close">关闭预览</button><iframe id="report" title="报表预览"></iframe></section>
+<script>
+const status=document.querySelector('#status'),portal=document.querySelector('#portal'),preview=document.querySelector('#preview');
+async function send(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await r.json();if(!r.ok)throw new Error(result.error?.message||'操作失败');return result;}
+document.querySelector('#login').onclick=async()=>{try{await send('/poc/login',{user:document.querySelector('#user').value,accessKey:document.querySelector('#key').value});portal.src='/?session='+Date.now();preview.hidden=true;status.textContent='已登录 · 数据来自 MySQL 和后端接口';}catch(e){status.textContent=e.message;}};
+document.querySelector('#logout').onclick=async()=>{try{await send('/poc/logout',{});portal.src='about:blank';preview.hidden=true;status.textContent='已退出';}catch(e){status.textContent=e.message;}};
+document.querySelector('#close').onclick=()=>{preview.hidden=true;document.querySelector('#report').src='about:blank';};
+function show(id){document.querySelector('#report').src='/poc/preview/'+encodeURIComponent(id);preview.hidden=false;}
+window.BI={Services:{getService:()=>({openCustomTab:(name,id,type,options)=>show(options.entryId)})}};
+window.FS={tabPane:{addItem:({src})=>{const url=new URL(src,location.origin);const id=url.pathname.split('/').pop();show(decodeURIComponent(id));}}};
+</script></html>

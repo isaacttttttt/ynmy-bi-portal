@@ -1,42 +1,10 @@
 import mysql from 'mysql2/promise';
-
-let pool = null;
-
-export function setupDatabase(fastify) {
-  // 创建数据库连接池
-  pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT || 3306,
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'ynmy_bi_portal',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 0,
+export function createPool(env = process.env) {
+  for (const key of ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']) if (!env[key]) throw new Error(`Missing ${key}`);
+  return mysql.createPool({
+    host: env.DB_HOST, port: Number(env.DB_PORT || 3306), user: env.DB_USER,
+    password: env.DB_PASSWORD, database: env.DB_NAME, charset: 'utf8mb4',
+    dateStrings: true, supportBigNumbers: true, bigNumberStrings: true,
+    waitForConnections: true, connectionLimit: 10, queueLimit: 100, connectTimeout: 5000,
   });
-
-  // 将数据库连接池添加到 Fastify 实例
-  fastify.decorate('db', pool);
-
-  // 测试数据库连接
-  pool.getConnection()
-    .then((connection) => {
-      fastify.log.info('✅ 数据库连接成功');
-      connection.release();
-    })
-    .catch((err) => {
-      fastify.log.error('❌ 数据库连接失败:', err);
-    });
-
-  // 应用关闭时关闭连接池
-  fastify.addHook('onClose', async (instance) => {
-    await pool.end();
-    instance.log.info('数据库连接池已关闭');
-  });
-}
-
-export function getPool() {
-  return pool;
 }
