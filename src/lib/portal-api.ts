@@ -1,4 +1,4 @@
-import type { Bootstrap, Notice, Page, Report, ReportPage, Filters, WorkbenchTab, WorkbenchData, Entry } from './portal-model';
+import type { Bootstrap, Notice, Page, Report, ReportPage, Filters, WorkbenchTab, WorkbenchData, Entry, SearchCategory } from './portal-model';
 import { safeUrl } from './portal-model';
 
 export const demoMode = (process.env.NEXT_PUBLIC_PORTAL_MODE || 'demo') === 'demo';
@@ -10,7 +10,7 @@ export interface Endpoints {
 export class PortalRequestError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
-export async function request<T>(path: string, signal?: AbortSignal, body?: unknown): Promise<T> {
+export async function request<T>(path: string, signal?: AbortSignal, body?: unknown, method = body === undefined ? 'GET' : 'PUT'): Promise<T> {
   if (demoMode) {
     const { mockRequest } = await import('./portal-mock');
     await new Promise<void>((resolve, reject) => {
@@ -19,10 +19,10 @@ export async function request<T>(path: string, signal?: AbortSignal, body?: unkn
       const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, 180);
       signal?.addEventListener('abort', abort, { once: true });
     });
-    return mockRequest(path, body) as T;
+    return mockRequest(path, body, method) as T;
   }
   const response = await fetch(`${apiBase}${path}`, {
-    method: body === undefined ? 'GET' : 'PUT', credentials: 'include', cache: 'no-store', signal,
+    method, credentials: 'include', cache: 'no-store', signal,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -34,8 +34,8 @@ export async function request<T>(path: string, signal?: AbortSignal, body?: unkn
   }
   return result.data as T;
 }
-export function reportPath(q: string, filters: Filters, page: number) {
-  const params = new URLSearchParams({ q, page: String(page), pageSize: '6' });
+export function reportPath(q: string, filters: Filters, page: number, category: SearchCategory = 'report') {
+  const params = new URLSearchParams({ q, category, page: String(page), pageSize: '6' });
   for (const [key, values] of Object.entries(filters)) values.forEach(v => params.append(key, v));
   return `/reports?${params}`;
 }

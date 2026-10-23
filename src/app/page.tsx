@@ -7,7 +7,7 @@ import NoticeModule from '@/components/portal/NoticeModule';
 import QuickEntryModule from '@/components/portal/QuickEntryModule';
 export default function HomePage() {
   const router = useRouter();
-  return <div className="portal-shell"><PortalHeader onSearch={q => router.push(`/report-dictionary/?q=${encodeURIComponent(q)}`)} />
+  return <div className="portal-shell"><PortalHeader onSearch={(q, category) => router.push(`/report-dictionary/?${new URLSearchParams({ q, category })}`)} />
     <main className="home-layout"><div className="home-main"><WorkbenchModule /><ThematicAnalysisModule /></div><aside className="home-aside"><NoticeModule /><QuickEntryModule /></aside></main>
   </div>;
 }

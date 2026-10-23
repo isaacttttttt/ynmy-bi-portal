@@ -14,6 +14,7 @@ if (mockHttp) {
 (async () => {
   const browser = await chromium.launch({ headless: true, channel: process.env.BROWSER_CHANNEL || 'msedge' });
   const context = await browser.newContext({ viewport: { width:1920, height:1080 } });
+  await context.addInitScript(() => { try { localStorage.setItem('ynby.portal.guide.v1', 'done'); } catch {} });
   const page = await context.newPage();
   page.setDefaultTimeout(60000);
   const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -41,7 +42,7 @@ if (mockHttp) {
     if ((refreshMode === 'failure' && endpoint === '/workbench') || refreshMode === 'expired') {
       await route.fulfill({ status:refreshMode === 'expired' ? 401 : 503, json:{success:false} }); return;
     }
-    const data = structuredClone(mockRequest(endpoint + url.search, request.method() === 'PUT' ? request.postDataJSON() : undefined));
+    const data = structuredClone(mockRequest(endpoint + url.search, request.method() === 'PUT' ? request.postDataJSON() : undefined, request.method()));
     if (refreshMode === 'updated' && endpoint === '/workbench') data.items[0].name = '后台更新后的报表';
     await route.fulfill({json:{success:true,data}});
   });
@@ -110,7 +111,7 @@ if (mockHttp) {
     await page.getByRole('button',{name:/报表字典维护说明/}).waitFor();
     await page.locator('.ant-modal-close').filter({visible:true}).click();
     await page.getByRole('dialog').waitFor({state:'hidden'});
-    await page.getByRole('textbox',{name:'搜索报表'}).fill('ROI');
+    await page.getByRole('combobox',{name:'搜索报表'}).fill('ROI');
     await page.getByRole('button',{name:'搜索',exact:true}).click();
     await page.locator('.dictionary-card').first().waitFor();
     assert.equal(await page.locator('.dictionary-card').count(),1);
@@ -129,7 +130,7 @@ if (mockHttp) {
     await page.getByRole('button',{name:'清除全部条件'}).click();
     await page.getByRole('button',{name:'下一页',exact:true}).click();
     await page.waitForURL(/page=2/); await page.locator('.dictionary-card').first().waitFor();
-    await page.getByRole('textbox',{name:'搜索报表'}).fill('不存在的报表');
+    await page.getByRole('combobox',{name:'搜索报表'}).fill('不存在的报表');
     await page.getByRole('button',{name:'搜索',exact:true}).click();
     await page.getByText('暂无符合条件的内容',{exact:true}).waitFor();
     await page.getByRole('button',{name:'清空搜索',exact:true}).click();
@@ -148,16 +149,16 @@ if (mockHttp) {
             const frame=document.querySelector('.portal-frame').getBoundingClientRect();
             const canvas=document.querySelector('.portal-canvas');
             const contentHeight=parseFloat(getComputedStyle(canvas).height);
-            const ratio=mode==='width' ? document.documentElement.clientWidth/1920 : Math.min(document.documentElement.clientWidth/1920, innerHeight/contentHeight);
-            return Math.abs(frame.width-1920*ratio)<1 && Math.abs(frame.height-contentHeight*ratio)<1;
+            const ratio=document.documentElement.clientWidth/1920;
+            return Math.abs(frame.width-document.documentElement.clientWidth)<1 && Math.abs(frame.height-(mode==='width'?contentHeight*ratio:innerHeight))<1;
           },mode);
           const dimensions=await page.evaluate(()=>({w:document.documentElement.scrollWidth,h:document.documentElement.scrollHeight,canvas:document.querySelector('.portal-canvas').offsetWidth}));
           assert.equal(dimensions.canvas,1920);
           assert(dimensions.w<=width,`${mode} horizontal overflow at ${width}`);
           if(mode==='fit') assert(dimensions.h<=height+1,`Fit must show the complete page at ${width}x${height}`);
           if(route==='/') {
-            const scale=(await page.locator('.portal-frame').boundingBox()).width/1920;
-            assert(Math.abs((await page.locator('.workbench').boundingBox()).height-469*scale)<1,'Scaled modes retain the 1920px design proportions');
+            const scale=await page.locator('.portal-canvas').evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).d);
+            assert(Math.abs((await page.locator('.workbench').boundingBox()).height-469*scale)<1,'Panel follows vertical scale');
           }
           await page.screenshot({path:path.join(output,`${route==='/'?'home':'dictionary'}-${mode}-${width}.png`),fullPage:true});
         }
@@ -194,7 +195,7 @@ if (mockHttp) {
       await host.locator('iframe').evaluate((el,{width,height})=>{el.style.width=`${width}px`;el.style.height=`${height}px`;},{width,height});
       await embedded.waitForFunction(()=>{
         const box=document.querySelector('.portal-frame').getBoundingClientRect();
-        return box.width>0 && box.right<=innerWidth+1 && box.bottom<=innerHeight+1 && document.documentElement.scrollHeight<=innerHeight+1 && (Math.abs(box.width-innerWidth)<1 || Math.abs(box.height-innerHeight)<1);
+        return box.width>0 && box.right<=innerWidth+1 && box.bottom<=innerHeight+1 && document.documentElement.scrollHeight<=innerHeight+1 && Math.abs(box.width-innerWidth)<1 && Math.abs(box.height-innerHeight)<1;
       });
       assert.equal(await embedded.getByRole('button',{name:'双向自适应',exact:true}).getAttribute('aria-pressed'),'true');
     }

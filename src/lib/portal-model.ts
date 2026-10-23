@@ -22,7 +22,13 @@ export type WorkbenchTab = 'recent' | 'frequent' | 'favorites';
 export type WorkbenchData = Record<WorkbenchTab, Report[]>;
 export type FilterKey = 'module' | 'status' | 'frequency' | 'volume';
 export type Filters = Record<FilterKey, string[]>;
-export interface ReportQuery { q: string; filters: Filters; page: number; pageSize: number }
+export const searchCategories = ['report', 'tag', 'metric'] as const;
+export type SearchCategory = typeof searchCategories[number];
+export const searchLabels: Record<SearchCategory, string> = { report: '报表', tag: '标签', metric: '指标' };
+export interface SearchHistory { items: { query: string; searchedAt: string }[] }
+export interface SearchItem { value: string; subtitle: string; report?: Report }
+export interface SearchResult { items: SearchItem[]; total: number }
+export interface ReportQuery { q: string; category?: SearchCategory; filters: Filters; page: number; pageSize: number }
 export interface Page<T> { items: T[]; total: number; page: number; pageSize: number }
 export interface ReportPage extends Page<Report> { facets: Record<FilterKey, { value: string; count: number }[]> }
 export const emptyFilters = (): Filters => ({ module: [], status: [], frequency: [], volume: [] });
@@ -36,7 +42,7 @@ export function paginate<T>(items: T[], page: number, pageSize: number): Page<T>
 }
 export function queryReports(reports: Report[], query: ReportQuery): ReportPage {
   const q = query.q.trim().toLocaleLowerCase();
-  const searched = reports.filter(r => [r.name, r.description, r.owner, r.source, ...r.metrics].some(v => v.toLocaleLowerCase().includes(q)));
+  const searched = reports.filter(r => searchValues(r, query.category).some(v => v.toLocaleLowerCase().includes(q)));
   const keys = Object.keys(query.filters) as FilterKey[];
   const value = (r: Report, k: FilterKey) => k === 'volume' ? volume(r.views) : r[k];
   const matches = (r: Report, except?: FilterKey) => keys.every(k => k === except || !query.filters[k].length || query.filters[k].includes(value(r, k)));
@@ -45,6 +51,21 @@ export function queryReports(reports: Report[], query: ReportQuery): ReportPage 
     facets[key] = [...new Set(reports.map(r => value(r, key)))].map(v => ({ value: v, count: searched.filter(r => matches(r, key) && value(r, key) === v).length }));
   }
   return { ...paginate(searched.filter(r => matches(r)), query.page, query.pageSize), facets };
+}
+function searchValues(r: Report, category: SearchCategory = 'report') {
+  return category === 'tag' ? [r.module] : category === 'metric' ? r.metrics : [r.name, r.description, r.owner, r.source, ...r.metrics];
+}
+export function searchCatalog(reports: Report[], category: SearchCategory, query: string): SearchResult {
+  const q = query.trim().toLocaleLowerCase(), active = reports.filter(r => r.status === 'active');
+  if (category === 'report') {
+    const found = active.filter(r => searchValues(r).some(v => v.toLocaleLowerCase().includes(q)));
+    return { items: found.slice(0, 20).map(r => ({ value: r.name, subtitle: `${typeLabel[r.type]} · ${r.module}`, report: r })), total: found.length };
+  }
+  const counts = new Map<string, number>();
+  for (const r of active) for (const value of new Set(searchValues(r, category))) {
+    if (value && value.toLocaleLowerCase().includes(q)) counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return { items: [...counts].slice(0, 20).map(([value, count]) => ({ value, subtitle: `${count} 份相关报表` })), total: counts.size };
 }
 export function descendants(entries: Entry[], rootId: string): Entry[] {
   // ponytail: one scan per depth; index parentId if large catalogs cause measured delay.

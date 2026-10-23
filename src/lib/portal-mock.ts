@@ -1,9 +1,10 @@
 import { bootstrap, notices, reports } from './portal-fixtures';
-import { emptyFilters, paginate, queryReports } from './portal-model';
-import type { FilterKey, WorkbenchTab } from './portal-model';
+import { emptyFilters, paginate, queryReports, searchCatalog } from './portal-model';
+import type { FilterKey, WorkbenchTab, SearchCategory, SearchHistory } from './portal-model';
 
 let favorites = [...bootstrap.favoriteIds];
 const storageKey = 'ynby.portal.demo.favorites.v1';
+let history: Partial<Record<SearchCategory, SearchHistory['items']>> = {};
 function readFavorites() {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(storageKey) || 'null');
@@ -11,7 +12,7 @@ function readFavorites() {
   } catch { /* Storage may be unavailable in an embedded browser; keep this session's state. */ }
   return favorites;
 }
-export function mockRequest(path: string, body?: unknown): unknown {
+export function mockRequest(path: string, body?: unknown, method = body === undefined ? 'GET' : 'PUT'): unknown {
   const url = new URL(path, 'https://demo.invalid'); const params = url.searchParams;
   const page = Math.max(1, Number(params.get('page')) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(params.get('pageSize')) || 8));
@@ -21,7 +22,21 @@ export function mockRequest(path: string, body?: unknown): unknown {
     for (const key of Object.keys(filters) as FilterKey[]) filters[key] = params.getAll(key);
     const order = ['entry-12', 'entry-16', 'entry-17', 'entry-18', 'entry-13', 'entry-14'];
     const sorted = [...reports].sort((a,b) => (order.includes(a.id) ? order.indexOf(a.id) : 100 + a.sort) - (order.includes(b.id) ? order.indexOf(b.id) : 100 + b.sort));
-    return queryReports(sorted, { q: params.get('q') || '', filters, page, pageSize });
+    return queryReports(sorted, { q: params.get('q') || '', category: (params.get('category') || 'report') as SearchCategory, filters, page, pageSize });
+  }
+  if (url.pathname === '/search') return searchCatalog(reports, (params.get('category') || 'report') as SearchCategory, params.get('q') || '');
+  if (url.pathname === '/search-history') {
+    const key = 'ynby.portal.demo.search-history.v1';
+    try { history = JSON.parse(localStorage.getItem(key) || '{}'); } catch { /* Session-only demo. */ }
+    const input = body as { category: SearchCategory; query: string } | undefined;
+    const category = input?.category || (params.get('category') || 'report') as SearchCategory;
+    if (method === 'DELETE') history[category] = [];
+    if (input) {
+      const query = input.query.trim().replace(/\s+/g, ' ');
+      history[category] = [{ query, searchedAt: new Date().toISOString() }, ...(history[category] || []).filter(item => item.query.toLocaleLowerCase() !== query.toLocaleLowerCase())].slice(0, 20);
+    }
+    if (method !== 'GET') try { localStorage.setItem(key, JSON.stringify(history)); } catch { /* Session-only demo. */ }
+    return { items: history[category] || [] };
   }
   if (url.pathname === '/workbench') {
     const tab = params.get('tab') as WorkbenchTab;

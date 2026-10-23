@@ -1,9 +1,11 @@
+import { searchCategories } from '../../src/lib/portal-model.ts';
+
 export class ApiError extends Error {
   constructor(statusCode, code, message) { super(message); this.statusCode = statusCode; this.code = code; }
 }
 export const invalid = () => new ApiError(400, 'INVALID_REQUEST', '请求参数不合法');
 export function pageQuery(query, { reports = false, workbench = false, defaultSize = 6 } = {}) {
-  const allowed = ['page', 'pageSize', ...(reports ? ['q', 'module', 'status', 'frequency', 'volume'] : []), ...(workbench ? ['tab'] : [])];
+  const allowed = ['page', 'pageSize', ...(reports ? ['q', 'category', 'module', 'status', 'frequency', 'volume'] : []), ...(workbench ? ['tab'] : [])];
   if (Object.keys(query).some(key => !allowed.includes(key))) throw invalid();
   const positive = (value, fallback, max) => {
     if (value === undefined) return fallback;
@@ -14,6 +16,7 @@ export function pageQuery(query, { reports = false, workbench = false, defaultSi
   if (reports) {
     if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 200)) throw invalid();
     result.q = (query.q || '').trim(); result.filters = {};
+    result.category = searchCategory(query.category);
     const enums = { status: ['active', 'archived'], frequency: ['实时', 'T+1', '周更新', '月更新'], volume: ['high', 'medium', 'low'] };
     for (const key of ['module', 'status', 'frequency', 'volume']) {
       const values = query[key] === undefined ? [] : Array.isArray(query[key]) ? query[key] : [query[key]];
@@ -26,6 +29,15 @@ export function pageQuery(query, { reports = false, workbench = false, defaultSi
     result.tab = query.tab;
   }
   return result;
+}
+export function searchCategory(value = 'report') {
+  if (!searchCategories.includes(value)) throw invalid();
+  return value;
+}
+export function searchQuery(query, withText = false) {
+  if (Object.keys(query).some(key => !['category', ...(withText ? ['q'] : [])].includes(key))) throw invalid();
+  if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 200)) throw invalid();
+  return { category: searchCategory(query.category), q: (query.q || '').trim() };
 }
 export function requireOrigin(request, origin) {
   if (request.headers.origin !== origin || request.headers['sec-fetch-site'] === 'cross-site') throw new ApiError(403, 'INVALID_ORIGIN', '请求来源不允许');

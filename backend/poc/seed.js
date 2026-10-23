@@ -10,12 +10,13 @@ const db = await mysql.createConnection({ host: process.env.MYSQLHOST, port: Num
 const database = process.env.MYSQLDATABASE;
 if (!/^[a-zA-Z0-9_]+$/.test(database) || !process.env.PORTAL_DB_PASSWORD || !process.env.PLATFORM_DB_PASSWORD) throw new Error('Missing seed configuration');
 try {
-  for (const file of ['001-portal.sql', '002-platform-poc.sql']) await db.query(await readFile(new URL(`../sql/${file}`, import.meta.url), 'utf8'));
+  for (const file of ['001-portal.sql', '002-platform-poc.sql', '003-search-history.sql']) await db.query(await readFile(new URL(`../sql/${file}`, import.meta.url), 'utf8'));
   for (const [user, password] of [['portal_reader', process.env.PORTAL_DB_PASSWORD], ['portal_platform', process.env.PLATFORM_DB_PASSWORD]]) {
     await db.query(`CREATE USER IF NOT EXISTS '${user}'@'%' IDENTIFIED BY ?`, [password]);
     await db.query(`ALTER USER '${user}'@'%' IDENTIFIED BY ?`, [password]);
   }
   for (const table of ['portal_data_batch', 'icon_repository', 'report_metadata', 'dim_bi_visit_log', 'fr_index_noticement', 'fr_quick_entry_app']) await db.query(`GRANT SELECT ON \`${database}\`.\`${table}\` TO 'portal_reader'@'%'`);
+  await db.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON \`${database}\`.portal_search_history TO 'portal_reader'@'%'`);
   for (const table of ['poc_users', 'poc_entries', 'poc_permissions', 'poc_favorites', 'poc_sessions', 'poc_faults']) await db.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON \`${database}\`.\`${table}\` TO 'portal_platform'@'%'`);
   const [existing] = await db.query('SELECT batch_id FROM portal_data_batch WHERE batch_id = 1');
   if (existing.length) { console.log('Schema ready; existing test data preserved.'); }
@@ -58,11 +59,19 @@ try {
     await reader.query('SELECT report_id FROM report_metadata LIMIT 1');
     await assert.rejects(reader.query('SELECT * FROM poc_sessions LIMIT 1'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
     await assert.rejects(reader.query('UPDATE report_metadata SET sort_no=sort_no WHERE 1=0'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
+    await reader.beginTransaction();
+    await reader.query('INSERT INTO portal_search_history (user_code, category, query_key, query_text, searched_at) VALUES (?,?,?,?,UTC_TIMESTAMP(6))', ['poc-index-check','report','index-check','index-check']);
+    const [plan] = await reader.query("EXPLAIN SELECT query_text, searched_at FROM portal_search_history WHERE user_code = 'poc-index-check' AND category = 'report' ORDER BY searched_at DESC, query_key LIMIT 20");
+    assert.equal(plan[0].key, 'idx_search_history_recent');
+    assert.ok(!plan[0].Extra.includes('Using filesort'));
+    await reader.query("UPDATE portal_search_history SET query_text='updated' WHERE user_code='poc-index-check'");
+    await reader.query("DELETE FROM portal_search_history WHERE user_code='poc-index-check'");
+    await reader.rollback();
   } finally { await reader.end(); }
   // A rolled-back row checks the inclusive DATE boundary against real MySQL on every deploy.
   await db.beginTransaction();
   await db.query('INSERT INTO fr_index_noticement (notice_uuid,notice_title,notice_start_day_id,notice_last_day_id,notice_register_day_id,notice_region_id) VALUES (?,?,?,?,?,?)',['poc-date-boundary','结束日当天有效',businessDate(),businessDate(),businessDate(),'topics']);
   assert.ok((await noticesFor(db,{ids:new Set(['topics'])})).some(n=>n.id==='poc-date-boundary'));
   await db.rollback();
-  console.log('Verified: read-only BFF privileges, session-table isolation and inclusive notice end date.');
+  console.log('Verified: business tables remain read-only; scoped history writes and recent index without filesort; session-table isolation; inclusive notice end date.');
 } catch(error) { await db.rollback(); console.error('Seed failed:', error.code || 'SEED_ERROR'); process.exitCode=1; } finally { await db.end(); }

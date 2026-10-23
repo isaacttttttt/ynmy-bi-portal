@@ -74,6 +74,46 @@ try {
   const clinicalBootstrap = await call(api + '/bootstrap', { cookie: clinical });
   assert.deepEqual(clinicalBootstrap.favoriteIds, ['entry-12']);
   assert.equal((await call(api + '/reports?q=' + encodeURIComponent('财务'), { cookie: clinical })).total, 0);
+  for (const category of ['report','tag','metric']) {
+    const result = await call(api + '/search?category=' + category, {cookie:clinical});
+    assert.ok(result.total > 0);
+    if(category==='report') assert.ok(result.items.every(item=>restricted.items.some(r=>r.id===item.report.id) && item.report.status==='active'));
+    else assert.ok(result.items.every(item=>restricted.items.some(r=>(category==='tag'?[r.module]:r.metrics).includes(item.value))));
+    assert.equal((await call(api+'/search?category='+category,{cookie:empty})).total,0);
+  }
+  const metric = await call(api+'/reports?category=metric&q=ROI',{cookie:admin});
+  assert.equal(metric.total,1); assert.ok(metric.items[0].metrics.includes('ROI'));
+  for(const suffix of ['/search?category=bad','/search?userId=admin','/search?q=a&q=b','/search-history?userId=admin','/reports?category=bad']) await call(api+suffix,{cookie:clinical,status:400});
+  const snapshots={};
+  for(const category of ['report','tag','metric']) snapshots[category]=await call(api+'/search-history?category='+category,{cookie:empty});
+  const otherHistory=await call(api+'/search-history?category=report',{cookie:clinical});
+  const historyWrite=(category,query,options={})=>call(api+'/search-history',{cookie:empty,method:'PUT',body:{category,query},...options});
+  const historyClear=(category,options={})=>call(api+'/search-history?category='+category,{cookie:empty,method:'DELETE',...options});
+  try {
+    for(const category of ['report','tag','metric']) await historyClear(category);
+    await historyWrite('report','  ROI  ');
+    const repeated=await historyWrite('report','roi');
+    assert.equal(repeated.items.length,1);assert.equal(repeated.items[0].query,'roi');assert.ok(repeated.items[0].searchedAt.endsWith('Z'));
+    await historyWrite('tag','供应链');await historyWrite('metric','ROI');
+    for(let i=0;i<22;i++) await historyWrite('report','history-'+i);
+    const saved=await call(api+'/search-history?category=report',{cookie:empty});
+    assert.equal(saved.items.length,20);assert.equal(saved.items[0].query,'history-21');assert.ok(!saved.items.some(item=>item.query==='history-0'));
+    const relogin=await login('empty');
+    assert.deepEqual(await call(api+'/search-history?category=report',{cookie:relogin}),saved,'History persists across sessions');
+    await call('/poc/logout',{cookie:relogin,method:'POST',body:{}});
+    await historyWrite('report','   ',{status:400});await historyWrite('report','x'.repeat(201),{status:400});await historyWrite('other','x',{status:400});
+    await historyWrite('report','x',{origin:'https://untrusted.invalid',status:403});
+    await historyClear('report',{origin:'https://untrusted.invalid',status:403});
+    await call(api+'/search-history',{cookie:empty,method:'PUT',body:{category:'report',query:'x',userId:'admin'},status:400});
+    await call(api+'/search-history?category=report',{status:401});
+    await historyClear('report');
+    assert.equal((await call(api+'/search-history?category=report',{cookie:empty})).items.length,0);
+    assert.equal((await call(api+'/search-history?category=tag',{cookie:empty})).items[0].query,'供应链');
+    assert.equal((await call(api+'/search-history?category=metric',{cookie:empty})).items[0].query,'ROI');
+    assert.deepEqual(await call(api+'/search-history?category=report',{cookie:clinical}),otherHistory,'Other user history is untouched');
+  } finally {
+    for(const category of ['report','tag','metric']) { await historyClear(category); for(const item of snapshots[category].items.toReversed()) await historyWrite(category,item.query); }
+  }
   const filtered = await call(api + '/reports?module=' + encodeURIComponent('临床经营') + '&module=' + encodeURIComponent('财务管理') + '&status=active&pageSize=100', { cookie: admin });
   assert.ok(filtered.items.every(r => ['临床经营', '财务管理'].includes(r.module) && r.status === 'active'));
   const second = await call(api + '/reports?page=2&pageSize=6', { cookie: admin });

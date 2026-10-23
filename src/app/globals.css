@@ -34,7 +34,13 @@ button { border:0; background:none; color:inherit; }
 .display-mode-switch button:hover { background:#e4efff; }
 .display-mode-switch button[aria-pressed="true"] { background:var(--portal-blue); color:#fff; }
 .portal-viewport { width:100%; min-height:100dvh; display:grid; justify-items:center; align-items:start; }
-.portal-viewport[data-display-mode="fit"] { align-items:center; }
+.portal-viewport[data-display-mode="fit"] { height:100dvh; overflow:clip; }
+.display-controls { display:flex; align-items:center; gap:4px; }
+.display-collapse,.guide-trigger { display:flex; align-items:center; gap:5px; font-size:12px; color:#376796; padding:6px 8px; border-radius:8px; background:#f5faffeb; }
+.display-mode-switch[hidden] { display:none; }
+.header-help { display:flex; align-items:center; gap:8px; }
+.guide-trigger:hover,.display-collapse:hover { background:#e4efff; }
+.guide-skip { margin-right:auto; }
 .portal-frame { width:100%; min-width:0; }
 .portal-frame.is-scaled { position:relative; overflow:clip; }
 .portal-canvas { display:flow-root; container-type:inline-size; }
@@ -46,6 +52,30 @@ button { border:0; background:none; color:inherit; }
 .portal-search input::placeholder { color:#91add4; }
 .portal-search input:focus-visible { outline:none; }
 .search-submit { align-self:stretch; border-radius:40px; background:var(--portal-blue); color:white; padding:0 24px; min-width:110px; font-size:18px; display:flex; align-items:center; justify-content:center; gap:8px; }
+.search-dropdown { position:fixed; z-index:1050; display:flex; flex-direction:column; background:#fff; border:1px solid #e4edf5; border-radius:20px; box-shadow:0 12px 40px #183d6c26; overflow:hidden; color:#192b38; }
+.search-category-tabs { display:flex; gap:36px; padding:0 30px; flex-shrink:0; border-bottom:1px solid #edf1f5; background:#fcfdff; }
+.search-category-tabs button { position:relative; padding:17px 8px; font-size:19px; color:#5e7898; }
+.search-category-tabs button[aria-selected="true"] { color:#006bb8; font-weight:700; }
+.search-category-tabs button[aria-selected="true"]::after { content:''; position:absolute; height:3px; left:4px; right:4px; bottom:0; background:#007abe; border-radius:3px; }
+.search-dropdown .panel-scroll { padding:0 20px 16px; }
+.search-section-title { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:18px 0 10px; color:#879bb4; font-size:16px; }
+.search-section-title button { padding:0; }
+.search-section-title button:hover:enabled { color:#006bb8; }
+.search-history-chips { display:flex; flex-wrap:wrap; gap:10px; }
+.search-history-chips button { display:flex; align-items:center; gap:8px; min-width:0; max-width:100%; padding:8px 16px; border-radius:24px; background:#f2f6fa; color:#5b748d; font-size:16px; }
+.search-history-chips button svg { flex-shrink:0; color:#95a6b9; }
+.search-history-chips button span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.search-history-chips button:hover { background:#e5f0fc; color:#006bb8; }
+.search-result-row { display:flex; align-items:center; gap:16px; width:100%; padding:14px 12px; border-radius:12px; text-align:left; }
+.search-result-row:hover,.search-result-row[aria-selected="true"] { background:#f1f7fe; }
+.search-result-icon { width:44px; height:44px; border-radius:13px; flex-shrink:0; display:flex; align-items:center; justify-content:center; background:#e7f2fb; color:#006cbb; }
+.search-result-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.search-result-copy strong { font-size:18px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.search-result-copy small { font-size:15px; color:#879bb4; }
+.search-result-badge { flex-shrink:0; border-radius:10px; padding:3px 10px; background:#e7f2fb; color:#006cbb; font-size:15px; }
+.search-empty { margin:10px 0 16px; font-size:14px; color:#879bb4; }
+.search-empty .text-button { margin-left:12px; }
+.search-all { display:block; width:100%; padding:12px; color:#006cbb; border-top:1px solid #edf1f5; }
 .dictionary-link { display:flex; align-items:center; gap:10px; padding:0 20px; height:58px; border-radius:40px; background:#f3f8ffdd; border:1px solid white; font-size:18px; }
 .dictionary-link svg { color:var(--portal-blue); }
 .home-link { color:#285d99; display:flex; align-items:center; gap:6px; font-size:13px; }

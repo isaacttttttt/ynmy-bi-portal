@@ -68,6 +68,7 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 | 参数 | 类型 / 默认值 | 规则 |
 | --- | --- | --- |
 | q | string / 空 | 去前后空格，最多200字符；检索名称、描述、指标、Owner、数据源；英文忽略大小写 |
+| category | string / report | `report` 按上述字段检索；`tag` 只查业务模块；`metric` 只查 core_metrics |
 | module | 重复 query 参数 | 业务模块，如 `module=供应链&module=财务管理` |
 | status | 重复 query 参数 | `active`、`archived` |
 | frequency | 重复 query 参数 | `实时`、`T+1`、`周更新`、`月更新`；底表其他值须规范化 |
@@ -94,6 +95,24 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 ```
 
 归档报表可以查元数据，字典禁用打开按钮；后端将其排除在工作台之外并拒绝新增收藏。平台专题来自 tree，元数据归档不会自动撤销平台权限；正式停用报表时须同时下架平台入口或撤销权限，防止从其他入口打开。没有正式口径的字段返回空字符串，不自动生成业务口径。
+
+## GET /search
+
+参数 `category=report|tag|metric`（默认 report）、`q`（默认空，最多200字符）。先检查权限，再从在用报表中搜索，最多返回20项及匹配总数。标签对应 `business_module`，指标对应 `core_metrics`，不新增独立标签模型。
+
+`data` 为 `{items:[{value,subtitle,report?}],total}`。报表项带完整 `Report`，可调用平台打开；标签、指标项去重，subtitle 给出当前授权范围内的相关报表数。点击标签或指标后，前端携带 q、category 进入字典。输入为空时，下拉层直接从工作台 recent 缓存提取最近报表及其标签、指标；不显示“猜你想搜”。
+
+## 搜索历史
+
+| 请求 | 参数 | 成功 data |
+| --- | --- | --- |
+| GET /search-history | query: `category=report|tag|metric` | `{items:[{query,searchedAt}]}` |
+| PUT /search-history | JSON: `{"category":"report","query":"经营分析"}` | 当前类别最新 items |
+| DELETE /search-history | query: `category=report|tag|metric` | `{items:[]}` |
+
+用户身份只取已验证会话，不能传 userId。读、写、清空均限定当前用户和类别；PUT 和 DELETE 校验同源 Origin。仅确认搜索、点击历史或选择结果时保存，不记录每次键入。关键词最多200字符，空白折叠并去首尾空白，空词拒绝保存；英文忽略大小写去重，重复搜索更新显示文本和时间。每人每类保留最近20条。`searchedAt` 为 UTC ISO 8601，按时间降序、标准化关键词升序稳定排序。
+
+表 `portal_search_history` 在 `backend/sql/003-search-history.sql` 定义。主键 `(user_code,category,query_key)` 负责去重；索引 `(user_code,category,searched_at DESC,query_key)` 支持最近列表、清空和保留条数查询。不记录会话令牌，不输出查询文本到请求日志。业务底表账号只对此表额外获得读写权限，其余业务表仍只读。
 
 ## GET /workbench
 

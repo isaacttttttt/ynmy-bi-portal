@@ -4,9 +4,9 @@ import staticFiles from '@fastify/static';
 import { fileURLToPath } from 'node:url';
 import { createPool } from './config/database.js';
 import { platformClient } from './platform.js';
-import { ApiError, invalid, pageQuery, requireOrigin } from './http.js';
-import { dataAsOf, reportsFor, noticesFor, quickEntries } from './repository.js';
-import { queryReports, paginate, descendants } from '../../src/lib/portal-model.ts';
+import { ApiError, invalid, pageQuery, requireOrigin, searchQuery } from './http.js';
+import { dataAsOf, reportsFor, noticesFor, quickEntries, searchHistory, saveSearch } from './repository.js';
+import { queryReports, paginate, descendants, searchCatalog, searchCategories } from '../../src/lib/portal-model.ts';
 
 export async function buildApp() {
   const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
@@ -29,7 +29,7 @@ export async function buildApp() {
   await app.register(async api => {
     api.decorateRequest('portal', null);
     api.addHook('preHandler', async request => {
-      if (request.method === 'PUT') requireOrigin(request, origin);
+      if (['PUT', 'DELETE'].includes(request.method)) requireOrigin(request, origin);
       request.portal = await platform.context(request);
     });
     api.get('/bootstrap', async request => {
@@ -50,6 +50,25 @@ export async function buildApp() {
       if (query.tab === 'recent') items.sort((a, b) => b.lastVisitedOn.localeCompare(a.lastVisitedOn) || a.id.localeCompare(b.id));
       if (query.tab === 'frequent') items.sort((a, b) => b.visits30d - a.visits30d || a.id.localeCompare(b.id));
       return { success: true, data: paginate(items, query.page, query.pageSize) };
+    });
+    api.get('/search', async request => {
+      const { category, q } = searchQuery(request.query, true);
+      return { success: true, data: searchCatalog(await reportsFor(db, request.portal), category, q) };
+    });
+    api.get('/search-history', async request => {
+      const { category } = searchQuery(request.query);
+      return { success: true, data: await searchHistory(db, request.portal.user.userName, category) };
+    });
+    api.put('/search-history', { schema: { body: { type: 'object', required: ['category', 'query'], additionalProperties: false, properties: { category: { type: 'string', enum: [...searchCategories] }, query: { type: 'string', minLength: 1, maxLength: 200 } } } } }, async request => {
+      if (Object.keys(request.query).length) throw invalid();
+      const query = request.body.query.trim().replace(/\s+/g, ' ');
+      if (!query) throw invalid();
+      return { success: true, data: await saveSearch(db, request.portal.user.userName, request.body.category, query) };
+    });
+    api.delete('/search-history', async request => {
+      const { category } = searchQuery(request.query);
+      await db.query('DELETE FROM portal_search_history WHERE user_code = ? AND category = ?', [request.portal.user.userName, category]);
+      return { success: true, data: { items: [] } };
     });
     api.get('/notices', async request => {
       const query = pageQuery(request.query, { defaultSize: 5 });

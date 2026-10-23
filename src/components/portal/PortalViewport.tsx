@@ -1,11 +1,12 @@
 "use client";
 
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown, ChevronUp, Monitor } from 'lucide-react';
 
 const modes = [
   { id: 'current', label: '当前布局', description: '保留桌面断点布局和模块固定高度' },
   { id: 'width', label: '宽度自适应', description: '按窗口宽度等比例缩放，允许纵向滚动' },
-  { id: 'fit', label: '双向自适应', description: '按窗口宽高等比例完整显示，允许留白' },
+  { id: 'fit', label: '双向自适应', description: '横纵独立拉伸，铺满当前窗口' },
 ] as const;
 type DisplayMode = typeof modes[number]['id'];
 const storageKey = 'ynby.portal.display-mode';
@@ -42,11 +43,12 @@ export default function PortalViewport({ children }: { children: ReactNode }) {
     window.scrollTo(0, 0);
   }
   const scaled = mode !== 'current';
-  const scale = mode === 'fit' ? Math.min(size.width / designWidth, size.height / Math.max(1, size.contentHeight)) : size.width / designWidth;
+  const scaleX = size.width / designWidth;
+  const scaleY = mode === 'fit' ? size.height / Math.max(1, size.contentHeight) : scaleX;
   return <DisplayContext.Provider value={{ mode, choose }}>
     <div ref={viewport} className="portal-viewport" data-display-mode={mode}>
-      <div className={`portal-frame${scaled ? ' is-scaled' : ''}`} style={scaled ? { width: designWidth * scale, height: size.contentHeight * scale } : undefined}>
-        <div ref={canvas} className="portal-canvas" style={scaled ? { width: designWidth, transform: `scale(${scale})` } : undefined}>{children}</div>
+      <div className={`portal-frame${scaled ? ' is-scaled' : ''}`} style={scaled ? { width: designWidth * scaleX, height: size.contentHeight * scaleY } : undefined}>
+        <div ref={canvas} className="portal-canvas" style={scaled ? { width: designWidth, transform: `scale(${scaleX}, ${scaleY})` } : undefined}>{children}</div>
       </div>
     </div>
   </DisplayContext.Provider>;
@@ -54,7 +56,11 @@ export default function PortalViewport({ children }: { children: ReactNode }) {
 
 export function DisplayModeSwitch() {
   const context = useContext(DisplayContext)!;
-  return <div className="display-mode-switch" role="group" aria-label="显示模式">
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => { try { setCollapsed(localStorage.getItem('ynby.portal.modes-collapsed') === 'true'); } catch { /* Session preference only. */ } }, []);
+  function toggle() { setCollapsed(value => { try { localStorage.setItem('ynby.portal.modes-collapsed', String(!value)); } catch { /* Session preference only. */ } return !value; }); }
+  return <div className="display-controls" data-coach="display"><button className="display-collapse" aria-label={collapsed ? '展开显示模式' : '收起显示模式'} aria-expanded={!collapsed} aria-controls="display-mode-options" onClick={toggle}><Monitor size={14} />{collapsed ? modes.find(m => m.id === context.mode)?.label : '显示模式'}{collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
+    <div id="display-mode-options" className="display-mode-switch" role="group" aria-label="显示模式" hidden={collapsed}>
     {modes.map(item => <button key={item.id} type="button" title={item.description} aria-pressed={context.mode === item.id} onClick={() => context.choose(item.id)}>{item.label}</button>)}
-  </div>;
+  </div></div>;
 }

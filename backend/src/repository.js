@@ -41,3 +41,16 @@ export async function quickEntries(db) {
   const [rows] = await db.query('SELECT * FROM fr_quick_entry_app WHERE status = 1 AND is_deleted = 0 ORDER BY sort_no, app_id');
   return rows.map(r => ({ id: r.app_key, name: r.app_name, description: r.app_desc || '', url: publicUrl(r.jump_url) }));
 }
+export async function searchHistory(db, user, category) {
+  const [items] = await db.query('SELECT query_text AS query, searched_at AS searchedAt FROM portal_search_history WHERE user_code = ? AND category = ? ORDER BY searched_at DESC, query_key LIMIT 20', [user, category]);
+  return { items: items.map(item => ({ ...item, searchedAt: item.searchedAt.replace(' ', 'T') + 'Z' })) };
+}
+export async function saveSearch(db, user, category, query) {
+  const key = query.toLocaleLowerCase();
+  await db.query(`INSERT INTO portal_search_history (user_code, category, query_key, query_text, searched_at)
+    VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE query_text = ?, searched_at = UTC_TIMESTAMP(6)`, [user, category, key, query, query]);
+  // Bound each user's category to 20 rows; the derived table allows MySQL to read the delete target.
+  await db.query(`DELETE FROM portal_search_history WHERE user_code = ? AND category = ? AND query_key NOT IN
+    (SELECT query_key FROM (SELECT query_key FROM portal_search_history WHERE user_code = ? AND category = ? ORDER BY searched_at DESC, query_key LIMIT 20) recent)`, [user, category, user, category]);
+  return searchHistory(db, user, category);
+}
