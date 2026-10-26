@@ -71,6 +71,8 @@ if (mockHttp) {
         } else {
           const left = await page.locator('.filters').boundingBox(), right = await page.locator('.dictionary-panel').boundingBox();
           assert(Math.abs(left.y + left.height - right.y - right.height) <= 1, `Dictionary bottom mismatch at ${width}`);
+          assert.equal(Math.round(left.height), width >= 2200 ? 977 : width < 1600 ? 838 : 800);
+          assert(await page.getByRole('region',{name:'报表筛选条件'}).evaluate(el=>el.scrollHeight>el.clientHeight),'More organization filters scroll inside the fixed panel');
         }
         await page.screenshot({path:path.join(output,`${name}-${width}.png`),fullPage:true});
       }
@@ -126,9 +128,10 @@ if (mockHttp) {
     await page.getByRole('heading',{name:'核心指标'}).waitFor();
     assert.deepEqual(await page.locator('.report-drawer h3').allTextContents(),['报表说明','报表简介','核心指标','数据来源','管理信息']);
     assert.deepEqual(await page.locator('.report-drawer dt').allTextContents(),['数据源系统','计算逻辑','报表 Owner','开发负责人','上线时间','最近更新时间','累计访问量']);
+    assert(await page.locator('.ant-drawer-content-wrapper').evaluate(el=>getComputedStyle(el).transitionDuration.split(',').some(value=>parseFloat(value)>0)), 'Drawer has a slide transition');
     await page.getByRole('region',{name:'报表详情'}).hover();
     assert.equal(await page.getByRole('region',{name:'报表详情'}).evaluate(el=>getComputedStyle(el).getPropertyValue('--scroll-thumb').trim()),'#57B8FF');
-    await page.screenshot({path:path.join(output,'report-detail-drawer.png'),fullPage:true});
+    await page.screenshot({path:path.join(output,'report-detail-drawer.png'),fullPage:false});
     await page.locator('.ant-drawer-close').filter({visible:true}).focus();
     await page.keyboard.press('Escape');
     await page.getByRole('dialog').waitFor({state:'hidden'});
