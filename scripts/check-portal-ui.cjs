@@ -57,8 +57,8 @@ if (mockHttp) {
         const broken = await page.locator('img').evaluateAll(imgs => imgs.filter(i => i.complete && !i.naturalWidth).map(i=>i.src));
         assert.deepEqual(broken, []);
         if (name === 'home') {
-          assert.equal(Math.round((await page.locator('.workbench').boundingBox()).height), width >= 2200 ? 555 : width < 1600 ? 471 : 469);
-          assert.equal(Math.round((await page.locator('.thematic').boundingBox()).height), width >= 2200 ? 396 : width < 1600 ? 351 : 324);
+          assert.equal(Math.round((await page.locator('.workbench').boundingBox()).height), width >= 2200 ? 555 : width < 1600 ? 471 : 460);
+          assert.equal(Math.round((await page.locator('.thematic').boundingBox()).height), width >= 2200 ? 396 : width < 1600 ? 351 : 320);
           assert((await page.locator('.portal-search').boundingBox()).width >= 680);
           const row = page.locator('.notice-row').first();
           const title = await row.getAttribute('aria-label');
@@ -153,12 +153,13 @@ if (mockHttp) {
             return Math.abs(frame.width-document.documentElement.clientWidth)<1 && Math.abs(frame.height-(mode==='width'?contentHeight*ratio:innerHeight))<1;
           },mode);
           const dimensions=await page.evaluate(()=>({w:document.documentElement.scrollWidth,h:document.documentElement.scrollHeight,canvas:document.querySelector('.portal-canvas').offsetWidth}));
+          assert(await page.locator('.portal-canvas').evaluate(el=>{const m=new DOMMatrix(getComputedStyle(el).transform);return Math.abs(m.a-m.d)<.00001}),'Both axes must use the same scale');
           assert.equal(dimensions.canvas,1920);
           assert(dimensions.w<=width,`${mode} horizontal overflow at ${width}`);
           if(mode==='fit') assert(dimensions.h<=height+1,`Fit must show the complete page at ${width}x${height}`);
-          if(route==='/') {
+          if(route==='/' && mode==='width') {
             const scale=await page.locator('.portal-canvas').evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).d);
-            assert(Math.abs((await page.locator('.workbench').boundingBox()).height-469*scale)<1,'Panel follows vertical scale');
+            assert(Math.abs((await page.locator('.workbench').boundingBox()).height-460*scale)<1,'Width mode preserves design panel height');
           }
           await page.screenshot({path:path.join(output,`${route==='/'?'home':'dictionary'}-${mode}-${width}.png`),fullPage:true});
         }
@@ -245,7 +246,7 @@ if (mockHttp) {
       for (const name of ['我收藏的','最近打开','我常用的']) {
         await page.getByRole('button',{name,exact:true}).click();
         assert.equal(await page.locator('.workbench .request-state').count(),0);
-        assert.equal(Math.round((await page.locator('.workbench').boundingBox()).height),469);
+        assert.equal(Math.round((await page.locator('.workbench').boundingBox()).height),460);
       }
       assert.equal(countReads(),initialReads,'Tab changes must use cache');
       await page.getByRole('region',{name:'工作台报表列表'}).evaluate(el => {el.scrollTop=80;});

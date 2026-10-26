@@ -4,13 +4,14 @@ import { Modal } from 'antd';
 import type { Notice, Page } from '@/lib/portal-model';
 import { Pagination, RequestState, SectionTitle, usePortalRequest } from './PortalProvider';
 import NoticeModal from './NoticeModal';
+import ScrollArea from './ScrollArea';
 
 export default function NoticeModule() {
   const [all, setAll] = useState(false);
   const [selected, setSelected] = useState<Notice | null>(null);
   const result = usePortalRequest<Page<Notice>>('/notices?page=1&pageSize=5');
   const detail = <NoticeModal notice={selected} onClose={() => setSelected(null)} />;
-  return <><section className="panel notices"><div className="section-heading"><SectionTitle>制度公告</SectionTitle><button className="text-button" onClick={() => setAll(true)}>全部公告 ›</button></div>{result.data?.items.length ? <NoticeList notices={result.data.items} onSelect={setSelected} /> : <RequestState {...result} />}</section>
+  return <><section className="panel notices"><div className="section-heading"><SectionTitle>制度公告</SectionTitle><button className="text-button" onClick={() => setAll(true)}>全部公告 ›</button></div><ScrollArea label="制度公告列表">{result.data?.items.length ? <NoticeList notices={result.data.items} onSelect={setSelected} /> : <RequestState {...result} />}</ScrollArea></section>
     <Modal open={all} onCancel={() => { setAll(false); setSelected(null); }} title="制度公告" footer={null} width={760} destroyOnHidden><AllNotices onSelect={setSelected} />{all && detail}</Modal>
     {!all && detail}
   </>;

@@ -1,13 +1,13 @@
 "use client";
 
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { ChevronDown, ChevronUp, Monitor } from 'lucide-react';
 
 const modes = [
-  { id: 'current', label: '当前布局', description: '保留桌面断点布局和模块固定高度' },
+  { id: 'current', label: '当前布局', description: '按设计稿比例排版，保留桌面断点和模块固定高度' },
   { id: 'width', label: '宽度自适应', description: '按窗口宽度等比例缩放，允许纵向滚动' },
-  { id: 'fit', label: '双向自适应', description: '横纵独立拉伸，铺满当前窗口' },
+  { id: 'fit', label: '双向自适应', description: '保持文字和图标比例，按窗口高度分配面板空间，内容内部滚动' },
 ] as const;
 type DisplayMode = typeof modes[number]['id'];
 const storageKey = 'ynby.portal.display-mode';
@@ -52,12 +52,14 @@ export default function PortalViewport({ children }: { children: ReactNode }) {
     try { localStorage.setItem(storageKey, next); } catch { /* Keep the selection for this page. */ }
   }
   const scaled = mode !== 'current';
-  const scaleX = size.width / designWidth;
-  const scaleY = mode === 'fit' ? size.height / Math.max(1, size.contentHeight) : scaleX;
+  const scale = Math.max(1280, size.width) / designWidth;
+  // Short embeds keep a usable desktop layout and scroll instead of compressing content.
+  const fitHeight = Math.max(800, size.height / scale);
+  const contentHeight = mode === 'fit' ? fitHeight : size.contentHeight;
   return <DisplayContext.Provider value={{ mode, choose }}>
     <div ref={viewport} className="portal-viewport" data-display-mode={mode}>
-      <div className={`portal-frame${scaled ? ' is-scaled' : ''}`} style={scaled ? { width: designWidth * scaleX, height: size.contentHeight * scaleY } : undefined}>
-        <div ref={canvas} className="portal-canvas" style={scaled ? { width: designWidth, transform: `scale(${scaleX}, ${scaleY})` } : undefined}>{children}</div>
+      <div className={`portal-frame${scaled ? ' is-scaled' : ''}`} style={scaled ? { width: designWidth * scale, height: contentHeight * scale } : undefined}>
+        <div ref={canvas} className="portal-canvas" style={scaled ? { width: designWidth, transform: `scale(${scale})`, '--fit-height': `${fitHeight}px` } as CSSProperties : undefined}>{children}</div>
       </div>
     </div>
   </DisplayContext.Provider>;
