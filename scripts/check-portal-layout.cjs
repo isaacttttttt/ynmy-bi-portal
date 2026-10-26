@@ -29,7 +29,9 @@ const fs=require('node:fs/promises');
         assert(await frame.locator('.portal-canvas').evaluate(el=>{const m=new DOMMatrix(getComputedStyle(el).transform);return Math.abs(m.a-m.d)<.00001}),'Text and icons must never stretch differently by axis');
         if(width===1920 && height===1080){
           for(const [selector,expected] of [['.portal-header',250],['.workbench',460],['.thematic',320]])assert(Math.abs((await frame.locator(selector).boundingBox()).height-expected)<1,selector+' matches the reference design');
-          for(const label of ['工作台报表列表','专题目录列表','快捷入口列表'])assert(await frame.getByRole('region',{name:label}).evaluate(el=>el.scrollHeight<=el.clientHeight+1),label+' fits the initial reference contents');
+          for(const [label,selector,count] of [['工作台报表列表','.workbench-card',8],['专题目录列表','.topic-card',6],['快捷入口列表','.quick-entry',5]]){
+            assert(await frame.getByRole('region',{name:label}).evaluate((el,{selector,count})=>{const items=el.querySelectorAll(selector),last=items[Math.min(count,items.length)-1];return last.getBoundingClientRect().bottom<=el.getBoundingClientRect().bottom+1},{selector,count}),label+' shows the reference rows completely; additional items may scroll');
+          }
         }
         if(label==='双向自适应'){
           assert(await frame.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1),'Fit fills the viewport without stretching');
