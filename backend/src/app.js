@@ -20,12 +20,12 @@ export async function buildApp() {
   app.addHook('onSend', async (request, reply) => { reply.header('Cache-Control', 'private, no-store'); reply.header('X-Content-Type-Options', 'nosniff'); reply.header('X-Request-Id', request.id); });
   app.addHook('onResponse', async (request, reply) => { app.log.info({ requestId: request.id, route: request.routeOptions.url, method: request.method, status: reply.statusCode }, 'request'); });
   app.setErrorHandler((error, request, reply) => {
-    const status = error instanceof ApiError ? error.statusCode : error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : error.code?.startsWith('ER_') || ['ECONNREFUSED', 'PROTOCOL_CONNECTION_LOST', 'PROTOCOL_SEQUENCE_TIMEOUT'].includes(error.code) ? 503 : 500;
+    const status = error instanceof ApiError ? error.statusCode : error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : /^[0-9A-Z]{5}$/.test(error.code || '') || ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code) || error.message === 'Query read timeout' ? 503 : 500;
     app.log.error({ requestId: request.id, code: error.code, status }, 'request failed');
     reply.code(status).send({ success: false, error: { code: error instanceof ApiError ? error.code : status === 400 ? 'INVALID_REQUEST' : status === 503 ? 'DATA_UNAVAILABLE' : 'SERVICE_ERROR', message: error instanceof ApiError ? error.message : status === 400 ? '请求参数不合法' : '服务暂时不可用，请重试' }, requestId: request.id });
   });
   app.setNotFoundHandler((request, reply) => reply.code(404).send({ success: false, error: { code: 'NOT_FOUND', message: '接口不存在' }, requestId: request.id }));
-  app.get('/health', async () => { await db.query({ sql: 'SELECT 1', timeout: 3000 }); return { status: 'ok' }; });
+  app.get('/health', async () => { await db.query('SELECT 1'); return { status: 'ok' }; });
   await app.register(async api => {
     api.decorateRequest('portal', null);
     api.addHook('preHandler', async request => {
@@ -67,7 +67,7 @@ export async function buildApp() {
     });
     api.delete('/search-history', async request => {
       const { category } = searchQuery(request.query);
-      await db.query('DELETE FROM portal_search_history WHERE user_code = ? AND category = ?', [request.portal.user.userName, category]);
+      await db.query('DELETE FROM portal_search_history WHERE user_code = $1 AND category = $2', [request.portal.user.userName, category]);
       return { success: true, data: { items: [] } };
     });
     api.get('/notices', async request => {

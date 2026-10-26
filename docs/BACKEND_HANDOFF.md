@@ -7,10 +7,10 @@
 | 服务 | 入口 | 职责 |
 | --- | --- | --- |
 | portal | https://portal-production-c6e5.up.railway.app/poc/ | Fastify 5 提供静态前端、`/api/portal/v1` 和测试平台代理 |
-| platform-simulator | Railway 内网，3002 | 模拟会话、授权目录、收藏和预览；数据写入 MySQL |
-| MySQL | Railway 内网，3306 | 持久化业务示例底表和模拟平台状态，挂载数据卷 |
+| platform-simulator | Railway 内网，3002 | 模拟会话、授权目录、收藏和预览；数据写入 PostgreSQL |
+| PostgreSQL | Railway 内网，5432 | 持久化业务示例底表和模拟平台状态，挂载数据卷 |
 
-项目 `ynmy-bi-portal-test`，ID `a24b6b09-9196-42c2-b5ed-3a8b8d2b437a`。Railway 默认环境名称为 `production`，实际用途是测试。三个服务均在此独立项目内。仅 portal 有公网域名；MySQL 无公网 TCP 代理。
+项目 `ynmy-bi-portal-test`，ID `a24b6b09-9196-42c2-b5ed-3a8b8d2b437a`。Railway 默认环境名称为 `production`，实际用途是测试。门户、模拟平台和 PostgreSQL 均在此独立项目内。旧 MySQL 保留用于回退，不再作为运行时数据源。
 
 访问码保存在本机 `artifacts/qa/Railway测试访问码.txt`。测试台提供综合、临床受限、无目录权限三种账号。登录后以 HttpOnly、Secure、SameSite=Lax Cookie 建立会话，8 小时到期；数据库只保存会话令牌哈希。访问码不进入前端构建、Git 或日志。
 
@@ -30,11 +30,13 @@ Railway 服务配置：
 
 配置直接保存在 Railway 服务设置中，不依赖已弃用的 `railway.json`。服务监听 IPv6，以支持 Railway 内网。两者共用同一代码仓库的 `codex/backend-railway-test` 分支。
 
-后端变量模板见 `backend/.env.example`。Railway 的数据库地址、端口、库名使用 `${{MySQL.MYSQLHOST}}` 等引用。portal 使用 `portal_reader`：业务底表只读，`portal_search_history` 单表允许 SELECT、INSERT、UPDATE、DELETE。模拟平台运行时使用 `portal_platform`，仅能读写 `poc_*` 表。模拟平台预部署脚本使用 MySQL 管理员建表、初始化和授权；此管理员变量不提供给 portal。
+后端变量模板见 `backend/.env.example`。Railway 的数据库地址、端口、库名使用 `${{Postgres.PGHOST}}` 等引用。portal 使用 `portal_reader`：业务底表只读，`portal_search_history` 单表允许 SELECT、INSERT、UPDATE、DELETE。模拟平台运行时使用 `portal_platform`，仅能读写 `poc_*` 表。模拟平台预部署脚本使用 PostgreSQL 管理员建表、初始化和授权；此管理员变量不提供给 portal。
 
 `FINE_BASE_URL` 指向模拟平台内网 `/webroot/decision`；`FINE_SESSION_PATH=/poc/session`。`POC_PLATFORM_URL` 仅在测试环境设置，启用 `/poc/*` 代理。正式环境应移除此变量和模拟平台服务。
 
-种子脚本按 `portal_data_batch` 标记只初始化一次。重复部署不会清空收藏、会话或权限；现有库不会自动迁移旧表结构。未来底表结构变更须增加明确的迁移脚本。
+预部署脚本按 `portal_migration_log` 的 `mysql-to-pg-v1` 标记执行一次迁移：以只读一致性快照读取旧 MySQL，将业务测试数据、收藏、会话和搜索历史写入 PG，在同一事务中验证行数后提交。目标表非空且没有迁移标记时拒绝覆盖；失败回滚，重复部署跳过数据导入。MySQL 驱动仅供此次迁移，运行时只使用 pg。正式底表后续接入，不把迁移的示例数据视作真实业务数据。
+
+模拟服务预部署使用 `PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE` 管理员引用；运行时仍使用 `DB_*`，但指向 PG，分别为两个受限角色。旧 `MYSQL*` 变量仅作首次迁移来源。业务详情新增可空 `online_date` 与 `last_update_note`，未维护字段不自动填充。以后已有 PG 表的结构调整应另建迁移，不依赖 CREATE TABLE IF NOT EXISTS 改列。
 
 ## 权限与数据链路
 
@@ -48,10 +50,10 @@ Railway 服务配置：
 
 业务 DDL：`backend/sql/001-portal.sql`；模拟平台 DDL：`backend/sql/002-platform-poc.sql`。`poc_*` 表不属于正式业务模型。
 
-搜索历史 DDL：`backend/sql/003-search-history.sql`。现有 Railway 库在模拟服务预部署时自动建此新表并授予单表权限，不清空已有数据。正式库需先执行此脚本并授权，再部署新增 API。历史按可信 user_code 和类别隔离；组合主键去重，最近记录组合索引支持用户、类别定位和有序读取，每人每类最多20条。预部署检查实际索引列及排序方向，记录真实 MySQL EXPLAIN，并回滚验证数据；小数据量下允许优化器选用主键。
+搜索历史 DDL：`backend/sql/003-search-history.sql`。现有 Railway 库在模拟服务预部署时自动建此新表并授予单表权限，不清空已有数据。正式库需先执行此脚本并授权，再部署新增 API。历史按可信 user_code 和类别隔离；组合主键去重，最近记录组合索引支持用户、类别定位和有序读取，每人每类最多20条。预部署检查实际索引列及排序方向，记录真实 PostgreSQL EXPLAIN，并回滚验证数据；小数据量下允许优化器选用主键。
 
 - `report_metadata.fine_entry_id` 与 tree 的入口 ID 关联，`report_id` 仅作元数据主键。BI 的发布任务 ID 取自平台，不与前两者混用。
-- Hive 日访问聚合由 ETL 同步至 MySQL `dim_bi_visit_log`。按可信 `user_code` 求 `SUM(visit_num)`；常用统计窗口为 `data_as_of` 向前 29 天，包含两端。未来日期不计入。最近访问取截至批次日期的最大访问日。
+- Hive 日访问聚合由 ETL 同步至 PostgreSQL `dim_bi_visit_log`。按可信 `user_code` 求 `SUM(visit_num)`；常用统计窗口为 `data_as_of` 向前 29 天，包含两端。未来日期不计入。最近访问取截至批次日期的最大访问日。
 - ETL 完成一批数据后，更新 `portal_data_batch.data_as_of`。表和标记应作为同一批次交付；不得先推进标记。
 - PoC 将原日期字符串规范为 DATE；原字段需在导入时转换。公告结束日当天有效，空权限范围默认不可见。
 - `total_views` 为底表累计访问量；当前用户近 30 日访问量单独用于常用排序。
@@ -83,7 +85,7 @@ node scripts/check-portal-ui.cjs
 
 重启持久化检查：先运行 `node backend/test/poc.mjs --prepare-restart`，在 Railway 重启或重新部署 portal 与 platform-simulator，待两个服务均成功后运行 `node backend/test/poc.mjs --verify-restart`。脚本验证同一会话和新增收藏仍有效，再恢复原收藏状态；临时会话文件只写入忽略目录。
 
-预部署脚本还会连接真实 MySQL 检查 portal_reader 能读业务表、不能写业务表或读取会话表，并用回滚事务验证公告结束日当天仍可见。示例公告有效期以首次初始化日期为准，长期复用测试库时需刷新示例日期；访问日期不会伪装成实时数据。
+预部署脚本还会连接真实 PostgreSQL 检查 portal_reader 能读业务表、不能写业务表或读取会话表，并用回滚事务验证公告结束日当天仍可见。示例公告有效期以首次初始化日期为准，长期复用测试库时需刷新示例日期；访问日期不会伪装成实时数据。
 
 前端固定 Next.js 15.5.28，并将 PostCSS 统一到修复版本；依赖锁文件随代码提交。运行镜像只包含静态页面和 Fastify 后端，不运行 Next.js 开发服务器。
 

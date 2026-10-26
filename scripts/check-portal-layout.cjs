@@ -87,7 +87,7 @@ const fs=require('node:fs/promises');
     await frame.getByRole('button',{name:'双向自适应',exact:true}).click();assert.equal(await frame.locator('.portal-viewport').getAttribute('data-display-mode'),'fit','Older browsers can still switch modes');
     await frame.getByRole('combobox',{name:'搜索报表'}).click();await frame.locator('.search-result-row').first().waitFor();
     assert((await frame.locator('.search-dropdown').boundingBox()).height<=400);await frame.getByRole('region',{name:'搜索内容'}).hover();
-    assert.equal(await frame.getByRole('region',{name:'搜索内容'}).evaluate(el=>getComputedStyle(el).getPropertyValue('--scroll-thumb').trim()),'#1677ff');
+    assert.equal(await frame.getByRole('region',{name:'搜索内容'}).evaluate(el=>getComputedStyle(el).getPropertyValue('--scroll-thumb').trim()),'#57B8FF');
     await frame.locator('img').evaluateAll(imgs=>Promise.all(imgs.map(img=>img.decode())));
     await page.screenshot({path:'artifacts/qa/restored-search-release.png',fullPage:true});
     assert.deepEqual(errors,[]);console.log('PASS: reference proportions, uniform scaling at normal and extreme aspect ratios, internal scrolling, dictionary alignment, real iframe scrollbars, stable individual/all/nested notices, animation, rapid switching, reduced motion and fallback.');

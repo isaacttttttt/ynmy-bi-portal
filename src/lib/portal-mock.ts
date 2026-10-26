@@ -22,14 +22,14 @@ export function mockRequest(path: string, body?: unknown, method = body === unde
     for (const key of Object.keys(filters) as FilterKey[]) filters[key] = params.getAll(key);
     const order = ['entry-12', 'entry-16', 'entry-17', 'entry-18', 'entry-13', 'entry-14'];
     const sorted = [...reports].sort((a,b) => (order.includes(a.id) ? order.indexOf(a.id) : 100 + a.sort) - (order.includes(b.id) ? order.indexOf(b.id) : 100 + b.sort));
-    return queryReports(sorted, { q: params.get('q') || '', category: (params.get('category') || 'report') as SearchCategory, filters, page, pageSize });
+    return queryReports(sorted, { q: params.get('q') || '', category: (params.get('category') || 'all') as SearchCategory, filters, page, pageSize });
   }
-  if (url.pathname === '/search') return searchCatalog(reports, (params.get('category') || 'report') as SearchCategory, params.get('q') || '');
+  if (url.pathname === '/search') return searchCatalog(reports, (params.get('category') || 'all') as SearchCategory, params.get('q') || '');
   if (url.pathname === '/search-history') {
     const key = 'ynby.portal.demo.search-history.v1';
     try { history = JSON.parse(localStorage.getItem(key) || '{}'); } catch { /* Session-only demo. */ }
     const input = body as { category: SearchCategory; query: string } | undefined;
-    const category = input?.category || (params.get('category') || 'report') as SearchCategory;
+    const category = input?.category || (params.get('category') || 'all') as SearchCategory;
     if (method === 'DELETE') history[category] = [];
     if (input) {
       const query = input.query.trim().replace(/\s+/g, ' ');

@@ -14,7 +14,7 @@ const fs = require('node:fs/promises');
     assert.equal(response.status(),200,path); return (await response.json()).data;
   }
   await api('/poc/login','POST',{user:'admin',accessKey});
-  const snapshots={};for(const category of ['report','tag','metric']) snapshots[category]=await api('/api/portal/v1/search-history?category='+category);
+  const snapshots={};for(const category of ['all','report','tag','metric']) snapshots[category]=await api('/api/portal/v1/search-history?category='+category);
   const writes=[];page.on('request',r=>{if(r.method()==='PUT' && r.url().includes('/search-history'))writes.push(r.postDataJSON());});
   const search=page.getByRole('combobox',{name:'搜索报表'});
   try {
@@ -33,14 +33,18 @@ const fs = require('node:fs/promises');
     for(const [width,height] of [[1280,720],[1920,900],[1440,1000]]) {
       await page.setViewportSize({width,height});
       await page.waitForFunction(()=>{const r=document.querySelector('.portal-frame').getBoundingClientRect();return Math.abs(r.width-innerWidth)<1&&Math.abs(r.height-innerHeight)<1;});
-      await search.click();await page.getByText('最近打开的报表',{exact:true}).waitFor();await page.locator('.search-result-row').first().waitFor();
+      await search.click();await page.getByText('最近打开及相关标签、指标',{exact:true}).waitFor();await page.locator('.search-result-row').first().waitFor();
       const panel=await page.locator('.search-dropdown').boundingBox(), anchor=await page.locator('.portal-search').boundingBox();
       assert(Math.abs(panel.x-anchor.x)<1 && Math.abs(panel.y-anchor.y-anchor.height-10)<1);
       assert(panel.y+panel.height<=height+1);assert.equal(await page.getByText(/猜你想搜/).count(),0);
       await page.screenshot({path:`artifacts/qa/search-dropdown-${width}.png`,fullPage:true});
       await page.keyboard.press('Escape');await page.locator('.search-dropdown').waitFor({state:'hidden'});
     }
-    await search.click();const n=writes.length;await search.fill('ROI');
+    await search.click();
+    assert.deepEqual(await page.getByRole('tablist',{name:'搜索类别'}).getByRole('tab').allTextContents(),['综合','报表','标签','指标']);
+    assert.equal(await page.getByRole('tab',{name:'综合',exact:true}).getAttribute('aria-selected'),'true');
+    assert.deepEqual([...new Set(await page.locator('.search-result-badge').allTextContents())],['报表','标签','指标']);
+    const n=writes.length;await search.fill('ROI');
     await page.locator('.search-result-row').first().waitFor();assert.equal(writes.length,n,'Typing does not save history');
     await page.getByRole('tab',{name:'指标',exact:true}).click();
     await page.locator('.search-result-row').filter({hasText:'ROI'}).waitFor();
@@ -64,9 +68,9 @@ const fs = require('node:fs/promises');
     await embedded.locator('.search-result-row').first().click();
     await page.frameLocator('#report').getByRole('heading',{name:expected,exact:true}).waitFor();
     assert.deepEqual(errors,[]);
-    console.log('PASS: coach marks, mode collapse/persistence, independent full-viewport scaling, dropdown alignment, categories, keyboard, history save/clear/reload and platform preview.');
+    console.log('PASS: coach marks, mode collapse/persistence, adaptive viewport layout, dropdown alignment, categories, keyboard, history save/clear/reload and platform preview.');
   } finally {
-    for(const category of ['report','tag','metric']) {
+    for(const category of ['all','report','tag','metric']) {
       await api('/api/portal/v1/search-history?category='+category,'DELETE');
       for(const item of snapshots[category].items.toReversed())await api('/api/portal/v1/search-history','PUT',{category,query:item.query});
     }

@@ -16,12 +16,12 @@ function accessKey(request) {
 async function session(request) {
   const authorization=request.headers.authorization;
   const token=authorization?.startsWith('Bearer ') ? authorization.slice(7) : cookieToken(request);
-  const [rows]=await db.query('SELECT s.*,u.display_name FROM poc_sessions s JOIN poc_users u USING(user_code) WHERE token_hash=? AND expires_at>UTC_TIMESTAMP()',[hash(token)]);
+  const {rows:rows}=await db.query('SELECT s.*,u.display_name FROM poc_sessions s JOIN poc_users u USING(user_code) WHERE token_hash=$1 AND expires_at>CURRENT_TIMESTAMP',[hash(token)]);
   if(!rows.length) throw new ApiError(401,'SESSION_EXPIRED','会话已失效');
   return rows[0];
 }
 async function granted(user,id) {
-  const [rows]=await db.query('SELECT e.payload FROM poc_permissions p JOIN poc_entries e USING(entry_id) WHERE user_code=? AND entry_id=? AND active=1',[user,id]);
+  const {rows:rows}=await db.query('SELECT e.payload FROM poc_permissions p JOIN poc_entries e USING(entry_id) WHERE user_code=$1 AND entry_id=$2 AND active=1',[user,id]);
   if(!rows.length) throw new ApiError(403,'FORBIDDEN','无目录权限');
   return rows[0].payload;
 }
@@ -33,17 +33,17 @@ app.get('/poc/',async(request,reply)=>reply.type('text/html').send(await readFil
 app.post('/poc/login',async(request,reply)=>{
   requireOrigin(request,origin);accessKey(request);
   if(typeof request.body?.user!=='string')throw invalid();
-  const [users]=await db.query('SELECT user_code FROM poc_users WHERE user_code=?',[request.body.user]);
+  const {rows:users}=await db.query('SELECT user_code FROM poc_users WHERE user_code=$1',[request.body.user]);
   if(!users.length)throw invalid();
   const token=randomBytes(32).toString('hex');
-  await db.query('DELETE FROM poc_sessions WHERE expires_at<=UTC_TIMESTAMP()');
-  await db.query('INSERT INTO poc_sessions VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 8 HOUR))',[hash(token),users[0].user_code]);
+  await db.query('DELETE FROM poc_sessions WHERE expires_at<=CURRENT_TIMESTAMP');
+  await db.query("INSERT INTO poc_sessions VALUES ($1,$2,CURRENT_TIMESTAMP + INTERVAL '8 hours')",[hash(token),users[0].user_code]);
   reply.header('Set-Cookie',`fine_auth_token=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=28800`);
   return{success:true};
 });
 app.post('/poc/logout',async(request,reply)=>{
   requireOrigin(request,origin);
-  try{const user=await session(request);await db.query('DELETE FROM poc_sessions WHERE token_hash=?',[user.token_hash]);}catch(error){if(error.statusCode!==401)throw error;}
+  try{const user=await session(request);await db.query('DELETE FROM poc_sessions WHERE token_hash=$1',[user.token_hash]);}catch(error){if(error.statusCode!==401)throw error;}
   reply.header('Set-Cookie','fine_auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');return{success:true};
 });
 app.get('/poc/preview/:id',async(request,reply)=>{
@@ -57,15 +57,15 @@ app.post('/poc/control',async request=>{
   if(actor.user_code!=='admin')throw new ApiError(403,'FORBIDDEN','仅测试管理员可修改测试场景');
   const {action,user,entryId,allowed,fault}=request.body;
   if(!['admin','clinical','empty'].includes(user))throw invalid();
-  if(action==='expire') await db.query('DELETE FROM poc_sessions WHERE user_code=?',[user]);
+  if(action==='expire') await db.query('DELETE FROM poc_sessions WHERE user_code=$1',[user]);
   else if(action==='permission') {
     if(typeof allowed!=='boolean'||typeof entryId!=='string')throw invalid();
-    const [entries]=await db.query('SELECT entry_id FROM poc_entries WHERE entry_id=?',[entryId]);if(!entries.length)throw invalid();
-    if(allowed)await db.query('INSERT IGNORE INTO poc_permissions VALUES (?,?)',[user,entryId]);
-    else await db.query('DELETE FROM poc_permissions WHERE user_code=? AND entry_id=?',[user,entryId]);
+    const {rows:entries}=await db.query('SELECT entry_id FROM poc_entries WHERE entry_id=$1',[entryId]);if(!entries.length)throw invalid();
+    if(allowed)await db.query('INSERT INTO poc_permissions VALUES ($1,$2) ON CONFLICT DO NOTHING',[user,entryId]);
+    else await db.query('DELETE FROM poc_permissions WHERE user_code=$1 AND entry_id=$2',[user,entryId]);
   } else if(action==='fault' && ['none','tree-unavailable','malformed-tree','favorites-failed'].includes(fault)) {
-    if(fault==='none')await db.query('DELETE FROM poc_faults WHERE user_code=?',[user]);
-    else await db.query('INSERT INTO poc_faults VALUES (?,?) ON DUPLICATE KEY UPDATE fault=VALUES(fault)',[user,fault]);
+    if(fault==='none')await db.query('DELETE FROM poc_faults WHERE user_code=$1',[user]);
+    else await db.query('INSERT INTO poc_faults VALUES ($1,$2) ON CONFLICT (user_code) DO UPDATE SET fault=EXCLUDED.fault',[user,fault]);
   } else throw invalid();
   return{success:true};
 });
@@ -73,22 +73,22 @@ app.get('/webroot/decision/poc/session',async request=>{
   const user=await session(request);return{data:{userName:user.user_code,name:user.display_name}};
 });
 app.get('/webroot/decision/v10/view/entry/tree',async request=>{
-  const user=await session(request);const [faults]=await db.query('SELECT fault FROM poc_faults WHERE user_code=?',[user.user_code]);
+  const user=await session(request);const {rows:faults}=await db.query('SELECT fault FROM poc_faults WHERE user_code=$1',[user.user_code]);
   if(faults[0]?.fault==='tree-unavailable')throw new ApiError(503,'TEST_FAULT','模拟目录不可用');
   if(faults[0]?.fault==='malformed-tree')return{data:[{id:'invalid'}]};
-  const [rows]=await db.query('SELECT e.payload FROM poc_entries e JOIN poc_permissions p USING(entry_id) WHERE p.user_code=? AND e.active=1 ORDER BY entry_id',[user.user_code]);
+  const {rows:rows}=await db.query('SELECT e.payload FROM poc_entries e JOIN poc_permissions p USING(entry_id) WHERE p.user_code=$1 AND e.active=1 ORDER BY entry_id',[user.user_code]);
   return{data:rows.map(r=>r.payload)};
 });
 app.get('/webroot/decision/v10/favorite/entry/list',async request=>{
-  const user=await session(request);const [rows]=await db.query('SELECT entry_id AS id FROM poc_favorites WHERE user_code=? ORDER BY entry_id',[user.user_code]);return{data:rows};
+  const user=await session(request);const {rows:rows}=await db.query('SELECT entry_id AS id FROM poc_favorites WHERE user_code=$1 ORDER BY entry_id',[user.user_code]);return{data:rows};
 });
 app.post('/webroot/decision/v10/favorite/entry/:id',async request=>{
   const user=await session(request);const entry=await granted(user.user_code,request.params.id);
   if(entry.path===null)throw invalid();
-  const [faults]=await db.query('SELECT fault FROM poc_faults WHERE user_code=?',[user.user_code]);
+  const {rows:faults}=await db.query('SELECT fault FROM poc_faults WHERE user_code=$1',[user.user_code]);
   if(faults[0]?.fault==='favorites-failed')return{data:'failed'};
-  if(request.query.fakeMethod==='DELETE')await db.query('DELETE FROM poc_favorites WHERE user_code=? AND entry_id=?',[user.user_code,entry.id]);
-  else await db.query('INSERT IGNORE INTO poc_favorites VALUES (?,?)',[user.user_code,entry.id]);
+  if(request.query.fakeMethod==='DELETE')await db.query('DELETE FROM poc_favorites WHERE user_code=$1 AND entry_id=$2',[user.user_code,entry.id]);
+  else await db.query('INSERT INTO poc_favorites VALUES ($1,$2) ON CONFLICT DO NOTHING',[user.user_code,entry.id]);
   return{data:'success'};
 });
 for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>app.close());

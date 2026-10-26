@@ -5,7 +5,7 @@ export class ApiError extends Error {
 }
 export const invalid = () => new ApiError(400, 'INVALID_REQUEST', '请求参数不合法');
 export function pageQuery(query, { reports = false, workbench = false, defaultSize = 6 } = {}) {
-  const allowed = ['page', 'pageSize', ...(reports ? ['q', 'category', 'module', 'status', 'frequency', 'volume'] : []), ...(workbench ? ['tab'] : [])];
+  const allowed = ['page', 'pageSize', ...(reports ? ['q', 'category', 'organization', 'status', 'permission', 'frequency', 'volume'] : []), ...(workbench ? ['tab'] : [])];
   if (Object.keys(query).some(key => !allowed.includes(key))) throw invalid();
   const positive = (value, fallback, max) => {
     if (value === undefined) return fallback;
@@ -17,8 +17,8 @@ export function pageQuery(query, { reports = false, workbench = false, defaultSi
     if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 200)) throw invalid();
     result.q = (query.q || '').trim(); result.filters = {};
     result.category = searchCategory(query.category);
-    const enums = { status: ['active', 'archived'], frequency: ['实时', 'T+1', '周更新', '月更新'], volume: ['high', 'medium', 'low'] };
-    for (const key of ['module', 'status', 'frequency', 'volume']) {
+    const enums = { permission: ['granted'], status: ['active', 'archived'], frequency: ['实时', 'T+1', '周更新', '月更新'], volume: ['high', 'medium', 'low'] };
+    for (const key of ['organization', 'status', 'permission', 'frequency', 'volume']) {
       const values = query[key] === undefined ? [] : Array.isArray(query[key]) ? query[key] : [query[key]];
       if (values.length > 20 || values.some(v => typeof v !== 'string' || !v || v.length > 100 || (enums[key] && !enums[key].includes(v)))) throw invalid();
       result.filters[key] = [...new Set(values)];
@@ -30,7 +30,7 @@ export function pageQuery(query, { reports = false, workbench = false, defaultSi
   }
   return result;
 }
-export function searchCategory(value = 'report') {
+export function searchCategory(value = 'all') {
   if (!searchCategories.includes(value)) throw invalid();
   return value;
 }

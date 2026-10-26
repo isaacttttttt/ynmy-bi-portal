@@ -34,7 +34,7 @@ export async function request<T>(path: string, signal?: AbortSignal, body?: unkn
   }
   return result.data as T;
 }
-export function reportPath(q: string, filters: Filters, page: number, category: SearchCategory = 'report') {
+export function reportPath(q: string, filters: Filters, page: number, category: SearchCategory = 'all') {
   const params = new URLSearchParams({ q, category, page: String(page), pageSize: '6' });
   for (const [key, values] of Object.entries(filters)) values.forEach(v => params.append(key, v));
   return `/reports?${params}`;

@@ -4,7 +4,7 @@
 
 /* Reference: awesome-design-md / Airtable. Brand and composition follow supplied artwork. */
 :root {
-  --portal-blue: #2575ff; --scroll-blue: #1677ff; --ink: #161e29; --muted: #667e9f;
+  --portal-blue: #2575ff; --scroll-blue: #57B8FF; --ink: #161e29; --muted: #667e9f;
   --line: #dce8f7; --surface: rgba(250,253,255,.96);
   --gap: clamp(16px,1.041666667cqw,26px); --page-pad: clamp(20px,1.5625cqw,40px);
   --panel-radius: 20px; --card-radius: 16px; --card-gap:16px;
@@ -231,13 +231,6 @@ legend { margin-bottom:12px; font-size:15px; font-weight:600; color:#617fa6; }
 .notice-meta { color:var(--muted); margin-bottom:24px; }
 .notice-content { white-space:pre-wrap; line-height:1.9; overflow-wrap:anywhere; }
 .preview-title { font-size:18px; font-weight:600; margin:20px 0; }
-.detail-title { display:flex; gap:16px; align-items:center; margin:20px 0; }
-.detail-title h2 { margin:0 0 5px; font-size:22px; }
-.detail-title p { margin:0; color:var(--muted); }
-.report-details dl { display:grid; grid-template-columns:1fr 1fr; gap:16px; background:#f4f8fd; padding:20px; margin:24px 0; }
-.report-details dt { font-size:12px; color:var(--muted); margin-bottom:4px; }
-.report-details dd { margin:0; }
-.report-details h3 { margin:20px 0 10px; font-size:16px; font-weight:600; }
 .detail-footer { display:flex; justify-content:flex-end; gap:10px; }
 .ant-modal-body { max-height:65vh; overflow:auto; }
 @container (max-width:1599px) {
@@ -298,3 +291,22 @@ legend { margin-bottom:12px; font-size:15px; font-weight:600; color:#617fa6; }
 ::view-transition-group(portal-layout),::view-transition-old(portal-layout),::view-transition-new(portal-layout) { animation-duration:280ms; animation-timing-function:cubic-bezier(.2,.7,.2,1); }
 @media (prefers-reduced-motion:reduce) { ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*) { animation-duration:0s; } }
 @keyframes spin { to { transform:rotate(360deg); } }
+
+.report-drawer .ant-drawer-header { padding:28px 32px; border-bottom:1px solid #e2ebf7; }
+.report-drawer .ant-drawer-header-title { align-items:flex-start; flex-direction:row-reverse; gap:16px; }
+.report-drawer .ant-drawer-close { margin:0; border:1px solid #e2ebf7; border-radius:9px; padding:8px; }
+.report-drawer .ant-drawer-title h2 { margin:0; color:#25496d; font-size:23px; font-weight:700; line-height:1.5; overflow-wrap:anywhere; }
+.report-drawer .ant-drawer-title p { margin:8px 0 0; color:var(--muted); font-size:14px; font-weight:400; }
+.report-drawer .ant-drawer-body { padding:0; overflow:hidden; }
+.report-drawer .panel-scroll { height:100%; padding:28px 32px; }
+.report-drawer section + section { margin-top:28px; }
+.report-drawer h3 { display:flex; align-items:center; gap:8px; margin:0 0 14px; font-size:15px; font-weight:600; color:var(--muted); }
+.report-drawer h3::before { content:''; width:3px; height:14px; background:var(--portal-blue); border-radius:2px; }
+.report-drawer section p { margin:0; font-size:15px; line-height:1.85; white-space:pre-wrap; overflow-wrap:anywhere; }
+.report-drawer dl { margin:0; }
+.report-drawer dl > div + div { margin-top:20px; }
+.report-drawer dt { margin-bottom:6px; font-size:13px; color:var(--muted); }
+.report-drawer dd { margin:0; font-size:15px; line-height:1.8; overflow-wrap:anywhere; }
+.report-drawer .calculation { padding:16px; background:#f5f8fc; border:1px solid #e0eaf5; border-radius:10px; white-space:pre-wrap; }
+.report-drawer .visit-count { color:var(--portal-blue); font-weight:600; }
+.report-drawer .ant-drawer-footer { padding:16px 32px; border-top:1px solid #e2ebf7; }

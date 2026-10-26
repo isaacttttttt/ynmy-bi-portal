@@ -8,7 +8,7 @@ import { searchCategories, searchLabels, searchCatalog, type SearchCategory, typ
 import { usePortal } from './PortalProvider';
 import ScrollArea from './ScrollArea';
 
-export default function PortalSearch({ query, category: selectedCategory = 'report', onSearch }: { query: string; category?: SearchCategory; onSearch: (q: string, category: SearchCategory) => void }) {
+export default function PortalSearch({ query, category: selectedCategory = 'all', onSearch }: { query: string; category?: SearchCategory; onSearch: (q: string, category: SearchCategory) => void }) {
   const { workbench, open: openReport } = usePortal();
   const [input, setInput] = useState(query), [category, setCategory] = useState(selectedCategory);
   const [open, setOpen] = useState(false), [active, setActive] = useState(-1), [attempt, setAttempt] = useState(0);
@@ -62,7 +62,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'repo
   function submit(value = q) { remember(value); setOpen(false); onSearch(value, category); }
   function choose(item: SearchItem) {
     remember(item.value); setOpen(false);
-    if (item.report) openReport(item.report); else { setInput(item.value); onSearch(item.value, category); }
+    if (item.report) openReport(item.report); else { setInput(item.value); onSearch(item.value, item.category); }
   }
   async function clearHistory() {
     setClearing(true);
@@ -70,7 +70,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'repo
     catch (error) { toast.error((error as Error).message); }
     finally { setClearing(false); }
   }
-  const ResultIcon = category === 'report' ? AppWindow : category === 'tag' ? Tag : Hash;
+  const resultIcons = { report: AppWindow, tag: Tag, metric: Hash };
   return <>{holder}<form ref={anchor} className="portal-search" onSubmit={event => { event.preventDefault(); submit(); }}>
     <Search size={20} aria-hidden="true" /><input ref={field} role="combobox" aria-label="搜索报表" aria-expanded={open} aria-controls="portal-search-results" aria-autocomplete="list" aria-activedescendant={open && active >= 0 ? `portal-search-option-${active}` : undefined} placeholder="搜索报表名称、标签、指标、Owner、数据源…" maxLength={200} value={input} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={event => { setInput(event.target.value); setOpen(true); }} onKeyDown={event => {
       if (event.nativeEvent.isComposing) { if (event.key === 'Enter') event.preventDefault(); return; }
@@ -82,15 +82,15 @@ export default function PortalSearch({ query, category: selectedCategory = 'repo
   </form>{open && createPortal(<div ref={dropdown} className="search-dropdown" style={position} aria-label="搜索面板">
     <div className="search-category-tabs" role="tablist" aria-label="搜索类别">{searchCategories.map((value, index) => <button type="button" role="tab" id={`search-tab-${value}`} aria-controls="search-category-panel" aria-selected={category === value} tabIndex={category === value ? 0 : -1} key={value} onClick={() => setCategory(value)} onKeyDown={event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-      event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? 2 : (index + (event.key === 'ArrowRight' ? 1 : -1) + 3) % 3;
+      event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? searchCategories.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + searchCategories.length) % searchCategories.length;
       setCategory(searchCategories[next]); document.getElementById(`search-tab-${searchCategories[next]}`)?.focus();
     }}>{searchLabels[value]}</button>)}</div>
     <ScrollArea label="搜索内容"><div id="search-category-panel" role="tabpanel" aria-labelledby={`search-tab-${category}`}>
       <div className="search-section-title"><span>历史搜索 · {searchLabels[category]}</span><button type="button" disabled={!history.items.length || clearing} onClick={clearHistory}>{clearing ? '清空中…' : '清空'}</button></div>
       {historyError ? <div className="search-empty" role="alert">{historyError}<button className="text-button" onClick={() => setAttempt(n => n + 1)}>重试</button></div> : history.items.length ? <div className="search-history-chips">{history.items.map(item => <button key={item.query} type="button" title={item.query} onClick={() => { setInput(item.query); submit(item.query); }}><History size={15} /><span>{item.query}</span></button>)}</div> : <p className="search-empty">暂无搜索记录</p>}
-      <div className="search-section-title"><span>{q ? `搜索结果 · ${searchLabels[category]}` : category === 'report' ? '最近打开的报表' : `最近打开报表的${searchLabels[category]}`}</span>{q && data && <span>{data.total} 项</span>}</div>
+      <div className="search-section-title"><span>{q ? `搜索结果 · ${searchLabels[category]}` : category === 'all' ? '最近打开及相关标签、指标' : category === 'report' ? '最近打开的报表' : `最近打开报表的${searchLabels[category]}`}</span>{q && data && <span>{data.total} 项</span>}</div>
       <div id="portal-search-results" role="listbox" aria-label={`${searchLabels[category]}搜索结果`} aria-busy={loading}>
-        {items.map((item, index) => <button type="button" role="option" id={`portal-search-option-${index}`} aria-selected={active === index} className="search-result-row" key={item.report?.id || item.value} onClick={() => choose(item)}><span className="search-result-icon"><ResultIcon size={21} /></span><span className="search-result-copy"><strong>{item.value}</strong><small>{item.subtitle}</small></span><span className="search-result-badge">{searchLabels[category]}</span></button>)}
+        {items.map((item, index) => { const ResultIcon = resultIcons[item.category]; return <button type="button" role="option" id={`portal-search-option-${index}`} aria-selected={active === index} className="search-result-row" key={`${item.category}:${item.report?.id || item.value}`} onClick={() => choose(item)}><span className="search-result-icon"><ResultIcon size={21} /></span><span className="search-result-copy"><strong>{item.value}</strong><small>{item.subtitle}</small></span><span className="search-result-badge">{searchLabels[item.category]}</span></button>; })}
       </div>
       {loading ? <p className="search-empty" role="status">正在加载…</p> : error ? <div className="search-empty" role="alert">{error}<button className="text-button" onClick={() => { setAttempt(n => n + 1); if (!q) workbench.retry(); }}>重试</button></div> : !items.length && <p className="search-empty">{q ? '没有匹配结果，请换个关键词' : '暂无最近打开的报表'}</p>}
       {q && !!data?.total && <button type="button" className="search-all" onClick={() => submit()}>查看全部相关报表</button>}

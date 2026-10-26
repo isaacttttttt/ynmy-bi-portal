@@ -1,6 +1,6 @@
 # 数据门户接口契约 v1
 
-本契约已由 `backend/src/app.js` 实现，并用于 Railway 测试部署。原有 `/api/reports` 等旧原型路由不再注册。当前连接 MySQL 示例底表和独立帆软模拟服务；真实底表、真实帆软会话仍需联调。部署、数据库适配和验收方法见 [后端交接](BACKEND_HANDOFF.md)。
+本契约已由 `backend/src/app.js` 实现，并用于 Railway 测试部署。原有 `/api/reports` 等旧原型路由不再注册。当前连接 PostgreSQL 测试底表和独立帆软模拟服务；真实底表、真实帆软会话仍需联调。部署、数据库适配和验收方法见 [后端交接](BACKEND_HANDOFF.md)。
 
 ## 接入约定
 
@@ -68,8 +68,9 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 | 参数 | 类型 / 默认值 | 规则 |
 | --- | --- | --- |
 | q | string / 空 | 去前后空格，最多200字符；检索名称、描述、指标、Owner、数据源；英文忽略大小写 |
-| category | string / report | `report` 按上述字段检索；`tag` 只查业务模块；`metric` 只查 core_metrics |
-| module | 重复 query 参数 | 业务模块，如 `module=供应链&module=财务管理` |
+| category | string / all | `all` 综合检索报表、业务模块和指标；`report` 按上述字段检索；`tag` 只查业务模块；`metric` 只查 core_metrics |
+| organization | 重复 query 参数 | 所属组织，取 `report_owner_dept`，空值显示“暂未维护” |
+| permission | 重复 query 参数 | `granted`（有访问权限）；未授权报表完全隐藏 |
 | status | 重复 query 参数 | `active`、`archived` |
 | frequency | 重复 query 参数 | `实时`、`T+1`、`周更新`、`月更新`；底表其他值须规范化 |
 | volume | 重复 query 参数 | `high`：>1000，`medium`：100–1000，`low`：<100；均为累计访问量 |
@@ -78,7 +79,7 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 
 同组多选 OR，组间 AND；空数组表示不限。默认无筛选。默认按元数据 `sort_no`、`metadataId` 稳定排序。切换搜索或筛选，前端重置第一页；搜索和筛选保存在 URL，支持刷新和浏览器前后退。
 
-`data` 包含 `items: Report[]`、`total`、`page`、`pageSize`、`facets`。`facets` 的四个键与筛选键相同，每组是 `{value:string,count:number}[]`。计数应用关键词和其他组条件，忽略本组条件，保留计数为0的可见选项。总数计算应用所有条件。
+`data` 包含 `items: Report[]`、`total`、`page`、`pageSize`、`facets`。`facets` 的五个键与筛选键相同，每组是 `{value:string,count:number}[]`。计数应用关键词和其他组条件，忽略本组条件，保留计数为0的可见选项。总数计算应用所有条件。
 
 Report 示例（卡片和详情使用同一对象，避免底表未就绪时增加空的详情接口）：
 
@@ -87,28 +88,31 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
   "id":"entry-123","metadataId":"1001","parentId":"health","name":"经营分析",
   "type":"bi","templateId":"publish-task-id","sort":1,
   "description":"报表介绍","module":"运营","department":"经营管理部",
-  "owner":"业务负责人","developer":"开发负责人","frequency":"T+1","status":"active",
+  "owner":"业务负责人","developer":"开发负责人","developerDepartment":"数据开发部",
+  "permission":"granted","onlineOn":null,"updateNote":"","frequency":"T+1","status":"active",
   "source":"ERP + 财务系统","metrics":["销售额","达成率"],
   "views":1000,"visits30d":12,"lastVisitedOn":"2026-10-22",
   "useScene":"经营例会","calcLogic":"底表维护的计算口径","updatedOn":"2026-10-22"
 }
 ```
 
+详情以右侧抽屉展示，依次为报表说明（useScene）、报表简介（description）、核心指标、数据来源（source、calcLogic）、管理信息。`onlineOn` 来自 `online_date`，`updateNote` 来自 `last_update_note`；`developerDepartment` 来自 `dev_owner_dept`。缺失值显示“暂未维护”，不以最近更新日期冒充上线时间。
+
 归档报表可以查元数据，字典禁用打开按钮；后端将其排除在工作台之外并拒绝新增收藏。平台专题来自 tree，元数据归档不会自动撤销平台权限；正式停用报表时须同时下架平台入口或撤销权限，防止从其他入口打开。没有正式口径的字段返回空字符串，不自动生成业务口径。
 
 ## GET /search
 
-参数 `category=report|tag|metric`（默认 report）、`q`（默认空，最多200字符）。先检查权限，再从在用报表中搜索，最多返回20项及匹配总数。标签对应 `business_module`，指标对应 `core_metrics`，不新增独立标签模型。
+参数 `category=all|report|tag|metric`（默认 all）、`q`（默认空，最多200字符）。先检查权限，再从在用报表中搜索，单类最多返回20项及匹配总数；综合按报表、标签、指标顺序合并各类结果，最多60项。标签对应 `business_module`，指标对应 `core_metrics`，不新增独立标签模型。
 
-`data` 为 `{items:[{value,subtitle,report?}],total}`。报表项带完整 `Report`，可调用平台打开；标签、指标项去重，subtitle 给出当前授权范围内的相关报表数。点击标签或指标后，前端携带 q、category 进入字典。输入为空时，下拉层直接从工作台 recent 缓存提取最近报表及其标签、指标；不显示“猜你想搜”。
+`data` 为 `{items:[{category,value,subtitle,report?}],total}`。报表项带完整 `Report`，可调用平台打开；标签、指标项去重，subtitle 给出当前授权范围内的相关报表数。点击标签或指标后，前端携带 q、category 进入字典。输入为空时，下拉层直接从工作台 recent 缓存提取最近报表及其标签、指标；不显示“猜你想搜”。
 
 ## 搜索历史
 
 | 请求 | 参数 | 成功 data |
 | --- | --- | --- |
-| GET /search-history | query: `category=report|tag|metric` | `{items:[{query,searchedAt}]}` |
+| GET /search-history | query: `category=all|report|tag|metric` | `{items:[{query,searchedAt}]}` |
 | PUT /search-history | JSON: `{"category":"report","query":"经营分析"}` | 当前类别最新 items |
-| DELETE /search-history | query: `category=report|tag|metric` | `{items:[]}` |
+| DELETE /search-history | query: `category=all|report|tag|metric` | `{items:[]}` |
 
 用户身份只取已验证会话，不能传 userId。读、写、清空均限定当前用户和类别；PUT 和 DELETE 校验同源 Origin。仅确认搜索、点击历史或选择结果时保存，不记录每次键入。关键词最多200字符，空白折叠并去首尾空白，空词拒绝保存；英文忽略大小写去重，重复搜索更新显示文本和时间。每人每类保留最近20条。`searchedAt` 为 UTC ISO 8601，按时间降序、标准化关键词升序稳定排序。
 
@@ -172,7 +176,7 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 | BI 发布任务 ID 不在元数据表中 | 由 tree 的 `templateId` 传递，不使用 `report_id` 代替 |
 | `dim_bi_visit_log` 为日汇总、只有 `visit_num` | SUM聚合访问量，最近只展示日粒度；近30日统计需至少30日可查询历史（示例 lifecycle 3 不足） |
 | DDL 名称 `dim_bi_visit_log` 与 INSERT 的 `dim_bi_visit_log_inc` 不同 | 确定最终服务表名、刷新日期、粒度与迟到数据处理方式 |
-| 日志和目录 DDL 是 ORC/Hive，后端计划 mysql2 | 提供 MySQL 服务层同步表/视图或明确查询服务，mysql2 不能直接查询 ORC |
+| 日志和目录原 DDL 为 ORC/Hive | 将查询所需底表同步到 PostgreSQL，当前 pg 驱动不直接查询 ORC |
 | 快捷入口索引引用未定义的 `is_deleted` | 补字段或移除索引项，启用状态与逻辑删除规则一致 |
 | `collect_list` 生成路径的顺序不稳定 | 按目录深度重建有序路径；前端仍以 ID 父子关系为准 |
 | 公告权限是逗号字符串，日期也是字符串 | 精确拆分 ID；统一日期格式、空范围默认不公开，确认是否需要全员标记 |

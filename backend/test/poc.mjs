@@ -70,14 +70,15 @@ try {
   const restricted = await call(api + '/reports?pageSize=100', { cookie: clinical });
   assert.deepEqual(restricted.items.map(r => r.id).sort(), ['entry-1', 'entry-12', 'entry-15', 'entry-16', 'entry-5'].sort());
   assert.equal(restricted.items.find(r => r.id === 'entry-1').visits30d, 2);
-  assert.ok(!restricted.facets.module.some(f => f.value === '财务管理'));
+  assert.ok(!restricted.facets.organization.some(f => f.value === '财务共享中心'));
   const clinicalBootstrap = await call(api + '/bootstrap', { cookie: clinical });
   assert.deepEqual(clinicalBootstrap.favoriteIds, ['entry-12']);
   assert.equal((await call(api + '/reports?q=' + encodeURIComponent('财务'), { cookie: clinical })).total, 0);
-  for (const category of ['report','tag','metric']) {
+  for (const category of ['all','report','tag','metric']) {
     const result = await call(api + '/search?category=' + category, {cookie:clinical});
     assert.ok(result.total > 0);
-    if(category==='report') assert.ok(result.items.every(item=>restricted.items.some(r=>r.id===item.report.id) && item.report.status==='active'));
+    if(category==='all') assert.ok(result.items.every(item=>item.category==='report' ? restricted.items.some(r=>r.id===item.report.id) : restricted.items.some(r=>(item.category==='tag'?[r.module]:r.metrics).includes(item.value))));
+    else if(category==='report') assert.ok(result.items.every(item=>restricted.items.some(r=>r.id===item.report.id) && item.report.status==='active'));
     else assert.ok(result.items.every(item=>restricted.items.some(r=>(category==='tag'?[r.module]:r.metrics).includes(item.value))));
     assert.equal((await call(api+'/search?category='+category,{cookie:empty})).total,0);
   }
@@ -85,15 +86,17 @@ try {
   assert.equal(metric.total,1); assert.ok(metric.items[0].metrics.includes('ROI'));
   for(const suffix of ['/search?category=bad','/search?userId=admin','/search?q=a&q=b','/search-history?userId=admin','/reports?category=bad']) await call(api+suffix,{cookie:clinical,status:400});
   const snapshots={};
-  for(const category of ['report','tag','metric']) snapshots[category]=await call(api+'/search-history?category='+category,{cookie:empty});
+  for(const category of ['all','report','tag','metric']) snapshots[category]=await call(api+'/search-history?category='+category,{cookie:empty});
   const otherHistory=await call(api+'/search-history?category=report',{cookie:clinical});
   const historyWrite=(category,query,options={})=>call(api+'/search-history',{cookie:empty,method:'PUT',body:{category,query},...options});
   const historyClear=(category,options={})=>call(api+'/search-history?category='+category,{cookie:empty,method:'DELETE',...options});
   try {
-    for(const category of ['report','tag','metric']) await historyClear(category);
+    for(const category of ['all','report','tag','metric']) await historyClear(category);
     await historyWrite('report','  ROI  ');
     const repeated=await historyWrite('report','roi');
     assert.equal(repeated.items.length,1);assert.equal(repeated.items[0].query,'roi');assert.ok(repeated.items[0].searchedAt.endsWith('Z'));
+    await historyWrite('all','综合检索');
+    assert.equal((await call(api+'/search-history?category=all',{cookie:empty})).items[0].query,'综合检索');
     await historyWrite('tag','供应链');await historyWrite('metric','ROI');
     for(let i=0;i<22;i++) await historyWrite('report','history-'+i);
     const saved=await call(api+'/search-history?category=report',{cookie:empty});
@@ -112,17 +115,25 @@ try {
     assert.equal((await call(api+'/search-history?category=metric',{cookie:empty})).items[0].query,'ROI');
     assert.deepEqual(await call(api+'/search-history?category=report',{cookie:clinical}),otherHistory,'Other user history is untouched');
   } finally {
-    for(const category of ['report','tag','metric']) { await historyClear(category); for(const item of snapshots[category].items.toReversed()) await historyWrite(category,item.query); }
+    for(const category of ['all','report','tag','metric']) { await historyClear(category); for(const item of snapshots[category].items.toReversed()) await historyWrite(category,item.query); }
   }
-  const filtered = await call(api + '/reports?module=' + encodeURIComponent('临床经营') + '&module=' + encodeURIComponent('财务管理') + '&status=active&pageSize=100', { cookie: admin });
-  assert.ok(filtered.items.every(r => ['临床经营', '财务管理'].includes(r.module) && r.status === 'active'));
+  const filtered = await call(api + '/reports?organization=' + encodeURIComponent('临床一部') + '&organization=' + encodeURIComponent('财务共享中心') + '&status=active&pageSize=100', { cookie: admin });
+  assert.ok(filtered.items.every(r => ['临床一部', '财务共享中心'].includes(r.department) && r.status === 'active'));
+  assert.ok(filtered.total > 0);
+  assert.deepEqual(Object.keys(all.facets), ['organization','status','permission','frequency','volume']);
+  const permitted = await call(api+'/reports?permission=granted&pageSize=100',{cookie:admin});
+  assert.equal(permitted.total,all.total);
+  assert.ok(all.items.every(r=>r.permission==='granted' && Object.hasOwn(r,'onlineOn') && Object.hasOwn(r,'developerDepartment') && Object.hasOwn(r,'updateNote')));
   const second = await call(api + '/reports?page=2&pageSize=6', { cookie: admin });
   assert.deepEqual(second.items.map(r => r.id), all.items.slice(6, 12).map(r => r.id));
   for (const suffix of ['/reports?page=0', '/reports?pageSize=101', '/reports?status=invalid', '/reports?userId=admin', '/workbench?tab=bad', '/bootstrap?userId=admin']) await call(api + suffix, { cookie: clinical, status: 400 });
   const notices = await call(api + '/notices?pageSize=100', { cookie: admin });
   assert.ok(notices.items.some(n => n.id === 'outside-topic'), 'notices use the full permission tree');
   assert.ok(notices.items.some(n => n.id === 'finance-only'));
-  assert.ok(!notices.items.some(n => ['exact-id', 'no-scope', 'expired', 'future'].includes(n.id)));
+  assert.ok(!notices.items.some(n => ['exact-id', 'no-scope', 'expired'].includes(n.id)));
+  const futureStarts = new Date(initial.dataAsOf+'T12:00:00Z'); futureStarts.setUTCDate(futureStarts.getUTCDate()+2);
+  const today = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  assert.equal(notices.items.some(n=>n.id==='future'), today>=futureStarts.toISOString().slice(0,10), 'A future notice becomes visible on its actual start date');
   assert.ok(notices.items[0].pinned && notices.items[1].pinned);
   const restrictedNotices = await call(api + '/notices?pageSize=100', { cookie: clinical });
   assert.ok(!restrictedNotices.items.some(n => n.id === 'finance-only' || n.id === 'exact-id'));

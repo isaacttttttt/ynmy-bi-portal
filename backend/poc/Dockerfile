@@ -6,7 +6,7 @@ WORKDIR /app
 COPY backend/src ./backend/src
 COPY backend/sql ./backend/sql
 COPY backend/poc ./backend/poc
-COPY src/lib/portal-model.ts src/lib/portal-fixtures.ts ./src/lib/
+COPY src/lib/portal-model.ts ./src/lib/
 ENV NODE_ENV=production PORT=3002
 USER node
 EXPOSE 3002

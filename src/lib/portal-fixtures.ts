@@ -24,7 +24,7 @@ const parents = ['clinical', 'finance', 'supply', 'production', 'clinical', 'fin
 export const reports: Report[] = samples.map((r, i) => ({
   id: `entry-${i + 1}`, metadataId: `${1001 + i}`, parentId: parents[i], name: r[0], type: r[1], sort: i,
   templateId: r[1] === 'bi' ? `publish-${i + 1}` : undefined,
-  description: r[5], module: r[2], department: r[3], owner: ['张兆', '李泰达', '段青青', '李雨'][i % 4], developer: '数据开发组（示例）',
+  description: r[5], module: r[2], department: r[3], owner: ['张兆', '李泰达', '段青青', '李雨'][i % 4], developer: '数据开发组（示例）', developerDepartment: '', permission: 'granted', onlineOn: null, updateNote: '',
   source: ['分销系统（智链）', 'EBS + 财务系统', 'DMS经销商管理系统', '数据中台'][i % 4],
   frequency: ['实时', 'T+1', '周更新', '月更新'][i % 4], status: i === 14 ? 'archived' : 'active',
   metrics: r[6].split(','), views: [2180, 880, 1000, 99, 3200, 500, 2100, 340, 650, 100, 300, 1600, 62, 740, 45, 890, 430, 720][i],

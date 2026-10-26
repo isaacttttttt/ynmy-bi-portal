@@ -2,7 +2,7 @@
 
 嵌入帆软平台的桌面门户，使用 Next.js 15、React 19、TypeScript、Tailwind CSS。保留设计稿的蓝白视觉与 `public/assets` 切图，支持1280–2560px桌面视口；较窄窗口保留桌面布局并横向滚动，不提供移动端适配。
 
-前端和 Fastify 后端已实现，测试环境部署在 Railway：门户静态页面和 API 同源，MySQL 与帆软模拟服务通过内网连接。真实底表和真实帆软会话尚未接入。
+前端和 Fastify 后端已实现，测试环境部署在 Railway：门户静态页面和 API 同源，PostgreSQL 与帆软模拟服务通过内网连接。真实底表和真实帆软会话尚未接入。
 
 测试入口：[Railway 测试平台](https://portal-production-c6e5.up.railway.app/poc/)。访问码仅保存在本地 `artifacts/qa/Railway测试访问码.txt`，不提交到仓库。
 

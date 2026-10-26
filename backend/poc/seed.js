@@ -1,79 +1,96 @@
+import pg from 'pg';
 import mysql from 'mysql2/promise';
 import { readFile } from 'node:fs/promises';
-import { bootstrap, reports, notices } from '../../src/lib/portal-fixtures.ts';
-import { businessDate } from '../src/http.js';
 import assert from 'node:assert/strict';
+import { createPool } from '../src/config/database.js';
 import { noticesFor } from '../src/repository.js';
+import { businessDate } from '../src/http.js';
 
-// Run as a Railway pre-deploy command with the MySQL administrator, not the BFF account.
-const db = await mysql.createConnection({ host: process.env.MYSQLHOST, port: Number(process.env.MYSQLPORT || 3306), user: process.env.MYSQLUSER, password: process.env.MYSQLPASSWORD, database: process.env.MYSQLDATABASE, multipleStatements: true });
-const database = process.env.MYSQLDATABASE;
-if (!/^[a-zA-Z0-9_]+$/.test(database) || !process.env.PORTAL_DB_PASSWORD || !process.env.PLATFORM_DB_PASSWORD) throw new Error('Missing seed configuration');
+// Railway pre-deploy only. Runtime services use separate, restricted PostgreSQL roles.
+for (const key of ['PGHOST','PGUSER','PGPASSWORD','PGDATABASE','PORTAL_DB_PASSWORD','PLATFORM_DB_PASSWORD']) {
+  if (!process.env[key]) throw new Error(`Missing ${key}`);
+}
+const db = new pg.Client({ connectionTimeoutMillis: 10000, statement_timeout: 30000 });
+const business = ['portal_data_batch','icon_repository','report_metadata','dim_bi_visit_log','fr_index_noticement','fr_quick_entry_app'];
+const platform = ['poc_users','poc_entries','poc_permissions','poc_favorites','poc_sessions','poc_faults'];
+const tables = [...business, ...platform, 'portal_search_history'];
+let source;
+await db.connect();
 try {
-  for (const file of ['001-portal.sql', '002-platform-poc.sql', '003-search-history.sql']) await db.query(await readFile(new URL(`../sql/${file}`, import.meta.url), 'utf8'));
-  for (const [user, password] of [['portal_reader', process.env.PORTAL_DB_PASSWORD], ['portal_platform', process.env.PLATFORM_DB_PASSWORD]]) {
-    await db.query(`CREATE USER IF NOT EXISTS '${user}'@'%' IDENTIFIED BY ?`, [password]);
-    await db.query(`ALTER USER '${user}'@'%' IDENTIFIED BY ?`, [password]);
+  await db.query("SET TIME ZONE 'UTC'");
+  await db.query('BEGIN');
+  await db.query("SELECT pg_advisory_xact_lock(790126)");
+  for (const file of ['001-portal.sql','002-platform-poc.sql','003-search-history.sql']) {
+    await db.query(await readFile(new URL(`../sql/${file}`, import.meta.url), 'utf8'));
   }
-  for (const table of ['portal_data_batch', 'icon_repository', 'report_metadata', 'dim_bi_visit_log', 'fr_index_noticement', 'fr_quick_entry_app']) await db.query(`GRANT SELECT ON \`${database}\`.\`${table}\` TO 'portal_reader'@'%'`);
-  await db.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON \`${database}\`.portal_search_history TO 'portal_reader'@'%'`);
-  for (const table of ['poc_users', 'poc_entries', 'poc_permissions', 'poc_favorites', 'poc_sessions', 'poc_faults']) await db.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON \`${database}\`.\`${table}\` TO 'portal_platform'@'%'`);
-  const [existing] = await db.query('SELECT batch_id FROM portal_data_batch WHERE batch_id = 1');
-  if (existing.length) { console.log('Schema ready; existing test data preserved.'); }
-  else {
-    const shift = (day, n) => { const date = new Date(day+'T12:00:00Z'); date.setUTCDate(date.getUTCDate()+n); return date.toISOString().slice(0,10); };
-    const today = businessDate(), asOf = shift(today,-1);
-    await db.beginTransaction();
-    for (const user of [['admin','综合测试用户'],['clinical','临床受限用户'],['empty','无目录权限用户']]) await db.query('INSERT INTO poc_users VALUES (?,?)',user);
-    const clinicalIds = new Set(['topics','clinical',...bootstrap.entries.filter(e=>e.parentId==='clinical').map(e=>e.id)]);
-    const entries = [...bootstrap.entries, {id:'outside',parentId:null,name:'其他授权目录',type:'folder',sort:200}, {id:'unmapped',parentId:'health',name:'尚未维护元数据的报表',type:'cpt',sort:300}];
-    for (const e of entries) {
-      const row = { id:e.id,pId:e.parentId,text:e.name,sortIndex:e.sort,entryType:e.type==='url'?5:1,path:e.type==='folder'?null:e.type==='bi'?`bi/${e.id}`:`reports/${e.id}.${e.type}`,templateId:e.templateId || null };
-      await db.query('INSERT INTO poc_entries (entry_id,payload) VALUES (?,?)',[e.id,JSON.stringify(row)]);
-      await db.query('INSERT INTO poc_permissions VALUES (?,?)',['admin',e.id]);
-      if (clinicalIds.has(e.id)) await db.query('INSERT INTO poc_permissions VALUES (?,?)',['clinical',e.id]);
-    }
-    const order=['entry-12','entry-16','entry-17','entry-18','entry-13','entry-14'];
-    for (const [i,r] of reports.entries()) {
-      await db.query(`INSERT INTO report_metadata (report_id,fine_entry_id,report_name,fine_report_path,report_desc,use_scene,business_module,report_owner_name,report_owner_dept,dev_owner_name,source_system,core_metrics,calc_logic,update_frequency,report_status,last_updated_at,total_views,sort_no)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[r.metadataId,r.id,r.name,`/示例/${r.id}`,r.description,r.useScene,r.module,r.owner,r.department,r.developer,r.source,JSON.stringify(r.metrics),r.calcLogic,r.frequency,r.status==='active'?1:0,asOf+' 12:00:00',r.views,order.includes(r.id)?order.indexOf(r.id):100+i]);
-      if (r.visits30d) {
-        const day=shift(asOf,-i%20), amount=Math.floor(r.visits30d/2);
-        await db.query('INSERT INTO dim_bi_visit_log (day_id,report_id,user_code,visit_type,visit_num) VALUES (?,?,?,?,?),(?,?,?,?,?)',[day,r.id,'admin','view',amount,day,r.id,'admin','export',r.visits30d-amount]);
-        if (clinicalIds.has(r.id)) await db.query('INSERT INTO dim_bi_visit_log (day_id,report_id,user_code,visit_num) VALUES (?,?,?,?)',[day,r.id,'clinical',2]);
+  await db.query('CREATE TABLE IF NOT EXISTS portal_migration_log (version TEXT PRIMARY KEY, migrated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, row_counts JSONB NOT NULL)');
+  const done = await db.query("SELECT version FROM portal_migration_log WHERE version='mysql-to-pg-v1'");
+  if (!done.rowCount) {
+    source = await mysql.createConnection({ host: process.env.MYSQLHOST, port: Number(process.env.MYSQLPORT || 3306), user: process.env.MYSQLUSER,
+      password: process.env.MYSQLPASSWORD, database: process.env.MYSQLDATABASE, dateStrings: true, supportBigNumbers: true, bigNumberStrings: true, connectTimeout: 10000 });
+    await source.query('SET TRANSACTION READ ONLY');
+    await source.query('START TRANSACTION WITH CONSISTENT SNAPSHOT');
+    const counts = {};
+    for (const table of tables) {
+      assert.equal((await db.query(`SELECT COUNT(*) FROM ${table}`)).rows[0].count, '0', `Refusing to overwrite nonempty PostgreSQL table: ${table}`);
+      const [rows] = await source.query(`SELECT * FROM ${table}`);
+      const columns = (await db.query('SELECT column_name, data_type FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position', ['public', table])).rows;
+      for (const row of rows) {
+        const fields = columns.filter(c => Object.hasOwn(row, c.column_name));
+        const values = fields.map(c => {
+          const value = row[c.column_name];
+          if (c.data_type === 'jsonb') return typeof value === 'string' ? value : JSON.stringify(value);
+          if (c.data_type === 'timestamp with time zone' && value) return value.replace(' ', 'T') + 'Z';
+          return value;
+        });
+        await db.query(`INSERT INTO ${table} (${fields.map(c => '"'+c.column_name+'"').join(',')}) VALUES (${values.map((_, i) => '$'+(i+1)).join(',')})`, values);
       }
+      counts[table] = rows.length;
+      assert.equal(Number((await db.query(`SELECT COUNT(*) FROM ${table}`)).rows[0].count), rows.length);
     }
-    // Large old count must not enter the current 30-day window; future rows are excluded too.
-    await db.query('INSERT INTO dim_bi_visit_log (day_id,report_id,user_code,visit_num) VALUES (?,?,?,?),(?,?,?,?)',[shift(asOf,-30),'entry-1','admin',9000,shift(asOf,1),'entry-1','admin',8000]);
-    for (const id of bootstrap.favoriteIds) await db.query('INSERT INTO poc_favorites VALUES (?,?)',['admin',id]);
-    await db.query('INSERT INTO poc_favorites VALUES (?,?)',['clinical','entry-12']);
-    const extra=[['finance-only','财务权限专属公告','finance',-1,10],['exact-id','精确ID匹配测试','entry-120',-1,10],['no-scope','空范围不公开','',-1,10],['expired','已过期公告','topics',-10,-1],['future','未生效公告','topics',1,10],['outside-topic','专题外目录公告','outside',-1,10]];
-    for (const [i,n] of notices.entries()) await db.query('INSERT INTO fr_index_noticement (notice_uuid,notice_title,notice_category,notice_is_top,notice_start_day_id,notice_last_day_id,notice_content,notice_register_day_id,notice_region_id) VALUES (?,?,?,?,?,?,?,?,?)',[n.id,n.title,n.category,n.pinned?1:0,shift(today,-30),shift(today,30),n.content,shift(today,-i-1),'topics']);
-    for (const [id,title,scope,start,end] of extra) await db.query('INSERT INTO fr_index_noticement (notice_uuid,notice_title,notice_category,notice_start_day_id,notice_last_day_id,notice_content,notice_register_day_id,notice_region_id) VALUES (?,?,?,?,?,?,?,?)',[id,title,'PoC验证',shift(today,start),shift(today,end),'仅用于权限及日期边界验证',shift(today,-1),scope]);
-    for (const [i,q] of bootstrap.quickEntries.entries()) await db.query('INSERT INTO fr_quick_entry_app (app_key,app_name,app_desc,jump_url,sort_no) VALUES (?,?,?,?,?)',[q.id,q.name,q.description,q.url,i]);
-    await db.query('INSERT INTO portal_data_batch (batch_id,data_as_of) VALUES (1,?)',[asOf]);
-    await db.commit(); console.log('Seeded synthetic portal data, three users and permission boundary cases.');
+    assert.equal((await db.query('SELECT COUNT(*) FROM portal_data_batch WHERE batch_id=1')).rows[0].count, '1', 'Source data batch must be ready');
+    await db.query("SELECT setval(pg_get_serial_sequence('fr_quick_entry_app','app_id'), COALESCE(MAX(app_id),1), COUNT(*)>0) FROM fr_quick_entry_app");
+    await db.query("INSERT INTO portal_migration_log VALUES ('mysql-to-pg-v1',CURRENT_TIMESTAMP,$1)", [JSON.stringify(counts)]);
+    await source.rollback();
+    console.log('Migrated existing test data from MySQL to PostgreSQL; verified row counts:', JSON.stringify(counts));
+  } else console.log('PostgreSQL migration already complete; existing data preserved.');
+  for (const [role, password] of [['portal_reader',process.env.PORTAL_DB_PASSWORD],['portal_platform',process.env.PLATFORM_DB_PASSWORD]]) {
+    const exists = await db.query('SELECT 1 FROM pg_roles WHERE rolname=$1',[role]);
+    if (!exists.rowCount) await db.query(`CREATE ROLE ${role} LOGIN`);
+    await db.query(`ALTER ROLE ${role} PASSWORD ${pg.escapeLiteral(password)}`);
+    await db.query(`GRANT CONNECT ON DATABASE ${pg.escapeIdentifier(process.env.PGDATABASE)} TO ${role}`);
+    await db.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
+    await db.query(`ALTER ROLE ${role} SET timezone='UTC'`);
   }
-  const reader = await mysql.createConnection({ host: process.env.MYSQLHOST, port: Number(process.env.MYSQLPORT || 3306), user: 'portal_reader', password: process.env.PORTAL_DB_PASSWORD, database, dateStrings: true });
+  await db.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC');
+  await db.query(`GRANT SELECT ON ${business.join(',')} TO portal_reader`);
+  await db.query('GRANT SELECT, INSERT, UPDATE, DELETE ON portal_search_history TO portal_reader');
+  await db.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${platform.join(',')} TO portal_platform`);
+  await db.query('COMMIT');
+  const reader = createPool({ DB_HOST:process.env.PGHOST, DB_PORT:process.env.PGPORT, DB_NAME:process.env.PGDATABASE, DB_USER:'portal_reader', DB_PASSWORD:process.env.PORTAL_DB_PASSWORD });
   try {
     await reader.query('SELECT report_id FROM report_metadata LIMIT 1');
-    await assert.rejects(reader.query('SELECT * FROM poc_sessions LIMIT 1'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
-    await assert.rejects(reader.query('UPDATE report_metadata SET sort_no=sort_no WHERE 1=0'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
-    await reader.beginTransaction();
-    await reader.query('INSERT INTO portal_search_history (user_code, category, query_key, query_text, searched_at) VALUES (?,?,?,?,UTC_TIMESTAMP(6))', ['poc-index-check','report','index-check','index-check']);
-    const [plan] = await reader.query("EXPLAIN SELECT query_text, searched_at FROM portal_search_history WHERE user_code = 'poc-index-check' AND category = 'report' ORDER BY searched_at DESC, query_key LIMIT 20");
-    console.log('History query plan:', JSON.stringify({ key: plan[0].key, possibleKeys: plan[0].possible_keys, extra: plan[0].Extra }));
-    // A tiny table may legitimately use the primary key. Verify the available index shape, not an optimizer preference.
-    const [indexes] = await reader.query("SHOW INDEX FROM portal_search_history WHERE Key_name='idx_search_history_recent'");
-    assert.deepEqual(indexes.map(row=>[row.Column_name,row.Collation]), [['user_code','A'],['category','A'],['searched_at','D'],['query_key','A']]);
-    await reader.query("UPDATE portal_search_history SET query_text='updated' WHERE user_code='poc-index-check'");
-    await reader.query("DELETE FROM portal_search_history WHERE user_code='poc-index-check'");
-    await reader.rollback();
+    await assert.rejects(reader.query('SELECT * FROM poc_sessions LIMIT 1'), {code:'42501'});
+    await assert.rejects(reader.query('UPDATE report_metadata SET sort_no=sort_no WHERE false'), {code:'42501'});
+    const client = await reader.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("INSERT INTO portal_search_history VALUES ('poc-index-check','all','index-check','index-check',CURRENT_TIMESTAMP)");
+      const index = await client.query("SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND indexname='idx_search_history_recent'");
+      assert.match(index.rows[0].indexdef, /\(user_code, category, searched_at DESC, query_key\)/);
+      const plan = await client.query("EXPLAIN SELECT query_text,searched_at FROM portal_search_history WHERE user_code='poc-index-check' AND category='all' ORDER BY searched_at DESC,query_key LIMIT 20");
+      console.log('History query plan:', plan.rows.map(row=>row['QUERY PLAN']).join(' | '));
+      await client.query("UPDATE portal_search_history SET query_text='updated' WHERE user_code='poc-index-check'");
+      await client.query("DELETE FROM portal_search_history WHERE user_code='poc-index-check'");
+    } finally { await client.query('ROLLBACK'); client.release(); }
   } finally { await reader.end(); }
-  // A rolled-back row checks the inclusive DATE boundary against real MySQL on every deploy.
-  await db.beginTransaction();
-  await db.query('INSERT INTO fr_index_noticement (notice_uuid,notice_title,notice_start_day_id,notice_last_day_id,notice_register_day_id,notice_region_id) VALUES (?,?,?,?,?,?)',['poc-date-boundary','结束日当天有效',businessDate(),businessDate(),businessDate(),'topics']);
+  await db.query('BEGIN');
+  await db.query('INSERT INTO fr_index_noticement (notice_uuid,notice_title,notice_start_day_id,notice_last_day_id,notice_register_day_id,notice_region_id) VALUES ($1,$2,$3,$3,$3,$4)', ['poc-date-boundary','结束日当天有效',businessDate(),'topics']);
   assert.ok((await noticesFor(db,{ids:new Set(['topics'])})).some(n=>n.id==='poc-date-boundary'));
-  await db.rollback();
-  console.log('Verified: business tables remain read-only; scoped history writes and recent index; session-table isolation; inclusive notice end date.');
-} catch(error) { await db.rollback(); console.error('Seed failed:', error.code || 'SEED_ERROR'); process.exitCode=1; } finally { await db.end(); }
+  await db.query('ROLLBACK');
+  console.log('Verified PostgreSQL business read-only access, session isolation, history CRUD/index and inclusive notice dates.');
+} catch (error) {
+  await db.query('ROLLBACK');
+  console.error('PostgreSQL migration failed:', error.code || error.name);
+  process.exitCode = 1;
+} finally { if(source) await source.end(); await db.end(); }
