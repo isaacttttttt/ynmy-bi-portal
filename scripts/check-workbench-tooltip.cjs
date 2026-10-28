@@ -31,7 +31,7 @@ const fs = require('node:fs/promises');
       const before = await card.boundingBox(); await card.hover();
       const tip = frame.getByRole('tooltip'); await tip.waitFor();
       await frame.locator('.workbench-tooltip').evaluate(el => Promise.all(el.getAnimations({subtree:true}).map(animation => animation.finished.catch(() => {}))));
-      await tip.hover();
+      const tipBox = await tip.boundingBox(); await page.mouse.move(tipBox.x + tipBox.width / 2, tipBox.y + tipBox.height / 2);
       assert.equal(await tip.locator('strong').innerText(), report.name);
       assert.equal(await tip.locator('p').innerText(), report.description || '暂未维护看板介绍');
       assert.equal(await tip.locator('[aria-label="所属领域"]').innerText(), report.module || '暂未维护所属领域');
@@ -57,7 +57,7 @@ const fs = require('node:fs/promises');
       const card = frame.locator('.workbench-card').nth(3); await card.hover();
       const tip = frame.getByRole('tooltip'); await tip.waitFor();
       await frame.locator('.workbench-tooltip').evaluate(el => Promise.all(el.getAnimations({subtree:true}).map(animation => animation.finished.catch(() => {}))));
-      await tip.hover();
+      const tipBox = await tip.boundingBox(); await page.mouse.move(tipBox.x + tipBox.width / 2, tipBox.y + tipBox.height / 2);
       const geometry = await frame.locator('.workbench-tooltip').evaluate(el => {
         const r = el.getBoundingClientRect(); return { x:r.x, y:r.y, width:r.width, right:r.right, bottom:r.bottom, vw:innerWidth, vh:innerHeight, inCanvas:!!el.closest('.portal-canvas') };
       });
