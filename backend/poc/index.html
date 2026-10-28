@@ -5,7 +5,7 @@
 <script>
 const status=document.querySelector('#status'),portal=document.querySelector('#portal'),preview=document.querySelector('#preview');
 async function send(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await r.json();if(!r.ok)throw new Error(result.error?.message||'操作失败');return result;}
-document.querySelector('#login').onclick=async()=>{try{await send('/poc/login',{user:document.querySelector('#user').value,accessKey:document.querySelector('#key').value});portal.src='/?session='+Date.now();preview.hidden=true;status.textContent='已登录 · 数据来自 MySQL 和后端接口';}catch(e){status.textContent=e.message;}};
+document.querySelector('#login').onclick=async()=>{try{await send('/poc/login',{user:document.querySelector('#user').value,accessKey:document.querySelector('#key').value});portal.src='/?session='+Date.now();preview.hidden=true;status.textContent='已登录 · 数据来自 PostgreSQL 和后端接口';}catch(e){status.textContent=e.message;}};
 document.querySelector('#logout').onclick=async()=>{try{await send('/poc/logout',{});portal.src='about:blank';preview.hidden=true;status.textContent='已退出';}catch(e){status.textContent=e.message;}};
 document.querySelector('#close').onclick=()=>{preview.hidden=true;document.querySelector('#report').src='about:blank';};
 function show(id){document.querySelector('#report').src='/poc/preview/'+encodeURIComponent(id);preview.hidden=false;}

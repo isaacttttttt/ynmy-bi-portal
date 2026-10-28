@@ -123,6 +123,13 @@ button { border:0; background:none; color:inherit; }
 .card-main:hover h3 { color:var(--tone); }
 .card-main p { color:#607fa9; font-size:13px; margin:0; line-height:1.6; }
 .workbench-card .card-main p { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ant-tooltip.workbench-tooltip { width:440px; max-width:calc(100vw - 32px); }
+.ant-tooltip.workbench-tooltip .ant-tooltip-inner { padding:18px 20px; border-radius:16px; max-height:calc(100dvh - 32px); overflow:auto; scrollbar-width:thin; scrollbar-color:#57B8FF transparent; box-shadow:0 12px 32px #142b3d26; }
+.workbench-preview { color:#f5f9fc; overflow-wrap:anywhere; }
+.workbench-preview > strong { display:block; font-size:18px; font-weight:600; line-height:1.5; }
+.workbench-preview > p { margin:8px 0 16px; font-size:14px; line-height:1.75; white-space:pre-wrap; color:#dce6ec; }
+.workbench-preview-meta { display:flex; flex-wrap:wrap; gap:6px 12px; padding-top:12px; border-top:1px solid #ffffff29; color:#adbec9; font-size:12px; }
+.workbench-preview-domain { color:#9dd6e4; }
 .card-foot { border-top:1px solid var(--line); padding-top:8px; margin-top:8px; display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:12px; color:#7286a2; }
 .card-foot span { display:flex; align-items:center; gap:5px; }
 .card-foot strong { color:var(--tone); font-weight:500; white-space:nowrap; }
