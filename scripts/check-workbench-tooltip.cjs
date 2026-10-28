@@ -30,7 +30,7 @@ const fs = require('node:fs/promises');
       await card.getByRole('heading', { name:report.name, exact:true }).waitFor();
       const before = await card.boundingBox(); await card.hover();
       const tip = frame.getByRole('tooltip'); await tip.waitFor();
-      await frame.locator('.workbench-tooltip').evaluate(el => Promise.all(el.getAnimations({subtree:true}).map(animation => animation.finished)));
+      await frame.locator('.workbench-tooltip').evaluate(el => Promise.all(el.getAnimations({subtree:true}).map(animation => animation.finished.catch(() => {}))));
       await tip.hover();
       assert.equal(await tip.locator('strong').innerText(), report.name);
       assert.equal(await tip.locator('p').innerText(), report.description || '暂未维护看板介绍');
@@ -40,8 +40,13 @@ const fs = require('node:fs/promises');
       assert.equal(await tip.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(27, 44, 56)');
       await page.screenshot({ path:`artifacts/qa/workbench-tooltip-${tab}.png` });
       await page.keyboard.press('Escape'); await tip.waitFor({ state:'hidden' });
-      const button = card.locator('.card-main'); await button.focus(); await tip.waitFor();
-      assert.equal(await button.getAttribute('aria-describedby'), await tip.getAttribute('id'));
+      const button = card.locator('.card-main'); await button.focus();
+      const focusedTip = frame.locator(`[role="tooltip"][id="workbench-preview-${encodeURIComponent(report.id)}"]`);
+      // Let the previous popup's leave animation and 250ms hover delay settle.
+      await page.waitForTimeout(500);
+      await focusedTip.waitFor();
+      await frame.locator('.workbench-tooltip').evaluateAll(elements => Promise.all(elements.flatMap(el => el.getAnimations({subtree:true}).map(animation => animation.finished.catch(() => {})))));
+      assert.equal(await button.getAttribute('aria-describedby'), await focusedTip.getAttribute('id'));
       await page.keyboard.press('Escape'); await tip.waitFor({ state:'hidden' });
       await button.evaluate(el => el.blur());
     }
@@ -51,7 +56,7 @@ const fs = require('node:fs/promises');
       await frame.getByRole('button', { name:mode, exact:true }).click();
       const card = frame.locator('.workbench-card').nth(3); await card.hover();
       const tip = frame.getByRole('tooltip'); await tip.waitFor();
-      await frame.locator('.workbench-tooltip').evaluate(el => Promise.all(el.getAnimations({subtree:true}).map(animation => animation.finished)));
+      await frame.locator('.workbench-tooltip').evaluate(el => Promise.all(el.getAnimations({subtree:true}).map(animation => animation.finished.catch(() => {}))));
       await tip.hover();
       const geometry = await frame.locator('.workbench-tooltip').evaluate(el => {
         const r = el.getBoundingClientRect(); return { x:r.x, y:r.y, width:r.width, right:r.right, bottom:r.bottom, vw:innerWidth, vh:innerHeight, inCanvas:!!el.closest('.portal-canvas') };

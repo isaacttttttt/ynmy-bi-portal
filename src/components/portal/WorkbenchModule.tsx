@@ -29,9 +29,13 @@ export default function WorkbenchModule() {
     <ScrollArea key={tab} label="工作台报表列表">{reports?.length ? <div className="workbench-grid">{reports.map(report => {
       const tooltipId = `workbench-preview-${encodeURIComponent(report.id)}`;
       return <Tooltip key={report.id} id={tooltipId} placement="bottomLeft" trigger={['hover', 'focus']} mouseEnterDelay={0.25} mouseLeaveDelay={0.1} color="#1b2c38" classNames={{ root: 'workbench-tooltip' }} destroyOnHidden
-        open={previewId === report.id} onOpenChange={visible => { if (visible && dismissed.current) return; setPreviewId(current => visible ? report.id : current === report.id ? null : current); }}
+        open={previewId === report.id} onOpenChange={visible => {
+          if (visible && dismissed.current) return;
+          if (!visible && document.activeElement?.closest('[data-workbench-report]')?.getAttribute('data-workbench-report') === report.id) return;
+          setPreviewId(current => visible ? report.id : current === report.id ? null : current);
+        }}
         title={<div className="workbench-preview"><strong>{report.name}</strong><p>{report.description || '暂未维护看板介绍'}</p><div className="workbench-preview-meta"><span>{typeLabel[report.type]}</span><span className="workbench-preview-domain" aria-label="所属领域">{report.module || '暂未维护所属领域'}</span><span>更新于 {report.updatedOn || '暂未维护'}</span></div></div>}>
-      <article className={`workbench-card tone-${themeFor(report.type)}`} onFocusCapture={() => { dismissed.current = false; }} onPointerMove={() => {
+      <article className={`workbench-card tone-${themeFor(report.type)}`} data-workbench-report={report.id} onFocusCapture={() => { setPreviewId(report.id); }} onPointerMove={() => {
         // Removing a tooltip exposes the card underneath; reopen only on an actual pointer move or focus.
         if (dismissed.current) { dismissed.current = false; setPreviewId(report.id); }
       }}>
