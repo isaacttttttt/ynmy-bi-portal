@@ -16,7 +16,7 @@ function accessKey(request) {
 async function session(request) {
   const authorization=request.headers.authorization;
   const token=authorization?.startsWith('Bearer ') ? authorization.slice(7) : cookieToken(request);
-  const {rows:rows}=await db.query('SELECT s.*,u.display_name FROM poc_sessions s JOIN poc_users u USING(user_code) WHERE token_hash=$1 AND expires_at>CURRENT_TIMESTAMP',[hash(token)]);
+  const {rows:rows}=await db.query("SELECT s.*,u.display_name,coalesce(to_jsonb(u)->>'source_user_code',s.user_code) AS source_user_code FROM poc_sessions s JOIN poc_users u USING(user_code) WHERE token_hash=$1 AND expires_at>CURRENT_TIMESTAMP",[hash(token)]);
   if(!rows.length) throw new ApiError(401,'SESSION_EXPIRED','会话已失效');
   return rows[0];
 }
@@ -29,7 +29,10 @@ app.addHook('onClose',()=>db.end());
 app.addHook('onSend',async(request,reply)=>{reply.header('Cache-Control','private, no-store');reply.header('X-Content-Type-Options','nosniff');});
 app.setErrorHandler((error,request,reply)=>reply.code(error.statusCode||500).send({success:false,error:{code:error.code||'PLATFORM_ERROR',message:error instanceof ApiError?error.message:'模拟平台服务失败'}}));
 app.get('/health',async()=>{await db.query('SELECT 1');return{status:'ok'};});
-app.get('/poc/',async(request,reply)=>reply.type('text/html').send(await readFile(new URL('./index.html',import.meta.url),'utf8')));
+app.get('/poc/',async(request,reply)=>{
+  const html=await readFile(new URL('./index.html',import.meta.url),'utf8');
+  return reply.type('text/html').send(process.env.PORTAL_DATA_MODEL==='source' ? html.replace('全部为示例数据','真实底表 · 模拟登录与目录权限').replace('临床受限用户','部分目录测试用户') : html);
+});
 app.post('/poc/login',async(request,reply)=>{
   requireOrigin(request,origin);accessKey(request);
   if(typeof request.body?.user!=='string')throw invalid();
@@ -70,7 +73,7 @@ app.post('/poc/control',async request=>{
   return{success:true};
 });
 app.get('/webroot/decision/poc/session',async request=>{
-  const user=await session(request);return{data:{userName:user.user_code,name:user.display_name}};
+  const user=await session(request);return{data:{userName:user.source_user_code,name:user.display_name}};
 });
 app.get('/webroot/decision/v10/view/entry/tree',async request=>{
   const user=await session(request);const {rows:faults}=await db.query('SELECT fault FROM poc_faults WHERE user_code=$1',[user.user_code]);
