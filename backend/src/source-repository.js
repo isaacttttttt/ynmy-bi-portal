@@ -9,9 +9,13 @@ export async function dataAsOf(db) {
 export async function reportsFor(db, context) {
   if (!context.ids.size) return [];
   const asOf = await dataAsOf(db);
-  const { rows } = await db.query(`SELECT r.*,
+  const { rows } = await db.query(`SELECT r.*, d.report_name AS dictionary_name, d.report_description,
+      d.business_domain, d.belonging_department, d.suggested_owner_name, d.developer_name,
+      d.update_cycle, d.go_live_time::date::text AS online_on, d.usage_scenario,
+      d.core_metrics, d.metrics_calc_logic, d.data_source,
       v.total_views, v.visits30d, v.last_visited
     FROM dim_bi_report_info_dtl r
+    LEFT JOIN dim_bi_report_dictionary d USING (report_id)
     LEFT JOIN (
       SELECT report_id, sum(visit_num::bigint) AS total_views,
         sum(visit_num::bigint) FILTER (WHERE user_code=$2 AND day_id >= ($3::date - 29)::text) AS visits30d,
@@ -22,11 +26,13 @@ export async function reportsFor(db, context) {
     WHERE r.report_id=ANY($1::text[]) ORDER BY r.report_name, r.report_id`, [[...context.ids], context.user.userName, asOf]);
   const entries = new Map(context.entries.map(entry => [entry.id, entry]));
   return rows.filter(row => entries.get(row.report_id)?.type !== 'folder').map(row => ({
-    ...entries.get(row.report_id), metadataId: row.report_id, name: row.report_name,
-    // report_lifecycle has no report_id yet; do not infer owners or metrics from names.
-    description: '', module: '', department: '', owner: '', developer: '', developerDepartment: '',
-    permission: 'granted', frequency: '', status: 'active', onlineOn: null, updateNote: '',
-    source: '', metrics: [], useScene: '', calcLogic: '', updatedOn: '',
+    ...entries.get(row.report_id), metadataId: row.report_id, name: row.dictionary_name?.trim() || entries.get(row.report_id).name,
+    description: row.report_description || '', module: row.business_domain || '', department: row.belonging_department || '',
+    owner: row.suggested_owner_name || '', developer: row.developer_name || '', developerDepartment: '',
+    permission: 'granted', frequency: ({'实时数据':'实时','每日更新一次':'每日更新','每月更新一次':'月更新','其它':'其他'})[row.update_cycle] || row.update_cycle || '',
+    status: 'active', onlineOn: row.online_on || null, updateNote: '',
+    source: row.data_source || '', metrics: (row.core_metrics || '').split(/[、，,；;\n]+/).map(value=>value.trim().replace(/[。；;]+$/,'')).filter(Boolean),
+    useScene: row.usage_scenario || '', calcLogic: row.metrics_calc_logic || '', updatedOn: '',
     views: Number(row.total_views || 0), visits30d: Number(row.visits30d || 0), lastVisitedOn: row.last_visited || null,
   }));
 }

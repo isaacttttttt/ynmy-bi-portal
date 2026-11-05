@@ -31,9 +31,26 @@ try{
  assert.equal(bootstrap.quickEntries.length,enabledLinks);
  const reports=await call('/reports?pageSize=100');assert.equal(reports.total,entries.length);
  const seen=new Set(reports.items.map(r=>r.id));
- for(let page=2;page<=Math.ceil(reports.total/100);page++) for(const report of (await call('/reports?pageSize=100&page='+page)).items) {assert(!seen.has(report.id));seen.add(report.id);}
+ const full=[...reports.items];
+ for(let page=2;page<=Math.ceil(reports.total/100);page++) for(const report of (await call('/reports?pageSize=100&page='+page)).items) {assert(!seen.has(report.id));seen.add(report.id);full.push(report);}
  assert.equal(seen.size,entries.length,'All source reports can be paged without loss or duplication');
- assert(reports.items.every(r=>r.owner==='' && r.metrics.length===0),'Unlinked lifecycle fields stay empty');
+ const dictionary=(await client.query("SELECT * FROM dim_bi_report_dictionary WHERE coalesce(suggested_owner_name,'')<>'' AND coalesce(report_name,'')<>'' LIMIT 1")).rows[0];
+ assert(dictionary);
+ const metadata=full.find(r=>r.id===dictionary.report_id);
+ assert(metadata);assert.equal(metadata.name,dictionary.report_name);assert.equal(metadata.owner,dictionary.suggested_owner_name);
+ assert.equal(metadata.description,dictionary.report_description || '');assert.equal(metadata.developer,dictionary.developer_name || '');
+ assert.equal(metadata.useScene,dictionary.usage_scenario || '');assert.equal(metadata.calcLogic,dictionary.metrics_calc_logic || '');
+ assert.equal(metadata.source,dictionary.data_source || '');assert.equal(metadata.updatedOn,'','No metadata update timestamp is supplied');
+ const daily=await call('/reports?frequency='+encodeURIComponent('每日更新'));assert(daily.total>0);assert(daily.items.every(r=>r.frequency==='每日更新'));
+ const metricReport=(await client.query("SELECT report_id FROM dim_bi_report_dictionary WHERE core_metrics IS NOT NULL AND core_metrics<>'' LIMIT 1")).rows[0];
+ const metric=full.find(r=>r.id===metricReport.report_id).metrics[0];assert(metric);
+ assert((await call('/search?category=metric&q='+encodeURIComponent(metric))).items.some(item=>item.value===metric));
+ const {rows:dictionaryNames}=await client.query('SELECT report_id,report_name FROM dim_bi_report_dictionary');
+ const names=new Map(dictionaryNames.map(row=>[row.report_id,row.report_name]));
+ for(const report of full){
+   assert.equal(report.name,names.get(report.id)?.trim() || entries.find(entry=>entry.id===report.id).name);
+   if(!names.has(report.id)){assert.equal(report.owner,'');assert.deepEqual(report.metrics,[]);}
+ }
  const target=reports.items[0];
  const found=await call('/search?category=all&q='+encodeURIComponent(target.name));assert(found.items.some(item=>item.report?.id===target.id));
  for(const category of ['report','tag','metric'])await call('/search?category='+category+'&q=');

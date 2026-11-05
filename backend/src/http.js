@@ -17,7 +17,7 @@ export function pageQuery(query, { reports = false, workbench = false, defaultSi
     if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 200)) throw invalid();
     result.q = (query.q || '').trim(); result.filters = {};
     result.category = searchCategory(query.category);
-    const enums = { permission: ['granted'], status: ['active', 'archived'], frequency: ['实时', 'T+1', '周更新', '月更新'], volume: ['high', 'medium', 'low'] };
+    const enums = { permission: ['granted'], status: ['active', 'archived'], frequency: ['实时', 'T+1', '每日更新', '周更新', '月更新', '其他'], volume: ['high', 'medium', 'low'] };
     for (const key of ['organization', 'status', 'permission', 'frequency', 'volume']) {
       const values = query[key] === undefined ? [] : Array.isArray(query[key]) ? query[key] : [query[key]];
       if (values.length > 20 || values.some(v => typeof v !== 'string' || !v || v.length > 100 || (enums[key] && !enums[key].includes(v)))) throw invalid();
