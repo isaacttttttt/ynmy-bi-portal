@@ -10,7 +10,8 @@ import * as sourceRepository from './source-repository.js';
 import { searchHistory, saveSearch } from './repository.js';
 import { queryReports, paginate, descendants, searchCatalog, searchCategories } from '../../src/lib/portal-model.ts';
 
-export async function buildApp({ platform = platformClient(), db = createPool() } = {}) {
+export async function buildApp({ platform, db = createPool() } = {}) {
+  platform ||= platformClient(process.env, db);
   const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
   const rootId = process.env.FINE_ROOT_ID;
   if (!rootId) throw new Error('Missing FINE_ROOT_ID');

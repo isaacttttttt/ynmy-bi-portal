@@ -2,13 +2,16 @@ import { ApiError, cookieToken, publicUrl } from './http.js';
 
 const upstreamError = () => new ApiError(502, 'PLATFORM_UNAVAILABLE', '帆软平台暂时不可用，请重试');
 const validId = value => typeof value === 'string' && /^[\w.:-]{1,128}$/.test(value);
-export function platformClient(env = process.env) {
+export function platformClient(env = process.env, db) {
   const base = new URL(env.FINE_BASE_URL);
   if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw new Error('Invalid FINE_BASE_URL');
   const sessionPath = env.FINE_SESSION_PATH;
-  if (!sessionPath) throw new Error('FINE_SESSION_PATH must identify the verified session endpoint');
+  const identityMode = env.FINE_IDENTITY_MODE || 'session';
+  if (!['session', 'trusted-cookie'].includes(identityMode)) throw new Error('Invalid FINE_IDENTITY_MODE');
+  if (identityMode === 'session' && !sessionPath) throw new Error('FINE_SESSION_PATH must identify the verified session endpoint');
+  if (identityMode === 'trusted-cookie' && !db) throw new Error('Database required for trusted-cookie identity');
   const paths = {
-    session: sessionPath,
+    ...(identityMode === 'session' ? { session: sessionPath } : {}),
     tree: env.FINE_TREE_PATH || '/v10/view/entry/tree',
     favorites: env.FINE_FAVORITES_PATH || '/v10/favorite/entry/list',
     add: env.FINE_FAVORITE_ADD_PATH || '/v10/favorite/entry/{entryId}',
@@ -21,7 +24,8 @@ export function platformClient(env = process.env) {
   const addMethod = env.FINE_FAVORITE_ADD_METHOD || 'POST', removeMethod = env.FINE_FAVORITE_REMOVE_METHOD || 'POST';
   if (![addMethod, removeMethod].every(method => ['POST', 'PUT', 'DELETE'].includes(method))) throw new Error('Invalid favorite HTTP method');
   const cookieName = env.FINE_COOKIE_NAME || 'fine_auth_token';
-  if (!/^[\w-]+$/.test(cookieName)) throw new Error('Invalid FINE_COOKIE_NAME');
+  const userCookieName = env.FINE_USER_COOKIE_NAME || 'fine_login_users';
+  if (![cookieName, userCookieName].every(name => /^[\w-]+$/.test(name))) throw new Error('Invalid platform cookie name');
   const browserBase = (env.FINE_BROWSER_BASE_URL || '/webroot/decision').replace(/\/$/, '');
   const accessPath = env.FINE_ENTRY_ACCESS_PATH || '/v10/entry/access/{entryId}';
   const entryAccessUrl = /^https?:\/\//.test(accessPath) ? accessPath : browserBase + accessPath;
@@ -48,11 +52,19 @@ export function platformClient(env = process.env) {
     browser: { entryAccessUrl, biServiceName: env.FINE_BI_SERVICE_NAME || 'dec.service.frame.tab_pane', biTabType: env.FINE_BI_TAB_TYPE || 'bi.subject.publink' },
     async context(request) {
       const token = cookieToken(request, cookieName);
-      // Identity is verified upstream; never decode a client JWT or trust userId.
-      const user = await call(token, paths.session);
-      if (!user || typeof user.userName !== 'string' || !user.userName || user.userName.length > 128 || typeof user.name !== 'string') throw upstreamError();
+      const userId = identityMode === 'trusted-cookie' ? cookieToken(request, userCookieName) : null;
+      if (userId && !validId(userId)) throw new ApiError(401, 'INVALID_IDENTITY', '平台用户标识无效');
+      let user = identityMode === 'session' ? await call(token, paths.session) : null;
       const rows = await call(token, paths.tree);
       if (!Array.isArray(rows) || rows.length > 10000) throw upstreamError();
+      if (identityMode === 'trusted-cookie') {
+        // The trusted gateway must validate both cookies and their user binding before proxying here.
+        const { rows: users } = await db.query(`SELECT username AS "userName", coalesce(nullif(realname,''),username) AS name
+          FROM dim_bi_user WHERE id=$1 AND enable='true' LIMIT 2`, [userId]);
+        if (users.length !== 1) throw new ApiError(403, 'USER_UNAVAILABLE', '平台用户未同步或已停用');
+        user = users[0];
+      }
+      if (!user || typeof user.userName !== 'string' || !user.userName || user.userName.length > 128 || typeof user.name !== 'string') throw upstreamError();
       const ids = new Set();
       const entries = rows.map(row => {
         if (!row || !validId(row.id) || ids.has(row.id) || (row.pId !== null && !validId(row.pId)) || typeof row.text !== 'string' || (row.path !== null && typeof row.path !== 'string')) throw upstreamError();

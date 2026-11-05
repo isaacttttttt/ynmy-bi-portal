@@ -7,7 +7,7 @@
 在本文件所在目录执行：
 
 ```bash
-docker load -i ynmy-bi-portal-customer-20261105-linux-amd64.tar
+docker load -i ynmy-bi-portal-customer-20261105-r2-linux-amd64.tar
 cp conf/portal.env.example conf/portal.env
 vi conf/portal.env
 docker compose -f compose.yaml up -d
@@ -23,7 +23,7 @@ docker compose -f compose.yaml logs --tail=100 portal
 
 默认端口为 3001。可用 `PORTAL_HTTP_PORT=8081 docker compose -f compose.yaml up -d` 修改宿主机端口，容器内部仍使用 3001。
 
-不使用 Compose 时，也可用 `docker run -d --name bi-portal --restart unless-stopped -p 3001:3001 --env-file ./conf/portal.env ynmy-bi-portal:customer-20261105`。这种方式把文件转为容器环境变量，改文件后需要删除并重新创建该容器，单纯 restart 不会重新读取 env-file。
+不使用 Compose 时，也可用 `docker run -d --name bi-portal --restart unless-stopped -p 3001:3001 --env-file ./conf/portal.env ynmy-bi-portal:customer-20261105-r2`。这种方式把文件转为容器环境变量，改文件后需要删除并重新创建该容器，单纯 restart 不会重新读取 env-file。
 
 ## 2. 必填项与平台接口
 
@@ -32,7 +32,9 @@ docker compose -f compose.yaml logs --tail=100 portal
 | `PUBLIC_ORIGIN` | 浏览器访问平台的源，例如 `https://bi.customer.example`；不带路径 |
 | `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD` | 容器可访问的 PostgreSQL 地址与账号；不要把宿主机数据库写成容器内的 localhost |
 | `FINE_BASE_URL` | 后端请求帆软的平台根地址，例如 `http://finebi.internal:8080/WebReport/ReportServer` |
-| `FINE_SESSION_PATH` | 用当前 token 获取可信登录身份的接口，必须由客户平台提供并验证 |
+| `FINE_IDENTITY_MODE` | 交付配置为 `trusted-cookie`，按客户主平台校验后的 Cookie 映射身份；也保留 `session` 模式 |
+| `FINE_USER_COOKIE_NAME` | 默认 `fine_login_users`，其值对应 `dim_bi_user.id` |
+| `FINE_SESSION_PATH` | 仅 `session` 模式使用；`trusted-cookie` 模式无需填写 |
 | `FINE_TREE_PATH` | 当前用户有权限的目录列表 |
 | `FINE_FAVORITES_PATH` | 当前用户的收藏列表 |
 | `FINE_FAVORITE_ADD_PATH/METHOD` | 添加收藏；路径中的 `{entryId}` 自动替换 |
@@ -46,7 +48,11 @@ docker compose -f compose.yaml logs --tail=100 portal
 
 后端接口路径以 `/` 开头时，追加到 `FINE_BASE_URL` 后面；也可以填写完整 HTTP(S) 地址。不要在地址中嵌入用户名、密码或固定用户 token。后端会把当前登录 token 作为 `Authorization: Bearer ...` 转发到配置的接口，因此这些地址必须属于客户可信平台。
 
-参考项目没有可信身份查询接口，`FINE_SESSION_PATH` 不是本项目假定存在的帆软内置 API。该接口必须校验 token，并返回：
+本客户采用 `fine_login_users → dim_bi_user.id → username`。仅接受启用（`enable='true'`）且唯一匹配的用户；公告权限、访问日志和搜索历史仍以查询得到的 username 关联。目录、收藏继续用 `fine_auth_token` 调用平台。每次请求从 Cookie 解析当前用户，不依赖首次 URL 参数，也不把首次用户固化成永久会话。
+
+`trusted-cookie` 模式依赖客户主平台或网关在转发门户 API 前校验两个 Cookie 的有效性及同一用户绑定，并阻止请求绕过该校验直达容器。门户不自行验证主平台 Cookie 签名；tree 接口成功只证明 token 有效，不单独证明 ID Cookie 与 token 属于同一人。此项是客户确认的接入前提，部署时需覆盖 `/api/portal/` 路由。
+
+如果以后改用 `FINE_IDENTITY_MODE=session`，再填写可信的 `FINE_SESSION_PATH`。该接口须返回：
 
 ```json
 {"data":{"userName":"dim_bi_user.username 对应值","name":"显示名称"}}
@@ -104,4 +110,4 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.portal_search_history TO portal_r
 
 镜像不执行建表、清库或示例数据初始化。客户配置不得设置 `POC_PLATFORM_URL`。备份挂载配置，并保留上一版镜像；回退时指定原 `PORTAL_IMAGE` 后重新创建容器。业务底表由客户维护，不包含在交付镜像或压缩包内。
 
-重新构建：在项目根目录执行 `docker build --platform linux/amd64 -t ynmy-bi-portal:customer-20261105 .`，再执行 `docker save -o ynmy-bi-portal-customer-20261105-linux-amd64.tar ynmy-bi-portal:customer-20261105`。不要用 Docker build args 或 COPY 把客户密码写进镜像。
+重新构建：在项目根目录执行 `docker build --platform linux/amd64 -t ynmy-bi-portal:customer-20261105-r2 .`，再执行 `docker save -o ynmy-bi-portal-customer-20261105-r2-linux-amd64.tar ynmy-bi-portal:customer-20261105-r2`。不要用 Docker build args 或 COPY 把客户密码写进镜像。
