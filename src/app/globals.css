@@ -110,6 +110,7 @@ button { border:0; background:none; color:inherit; }
 .workbench-card:hover,.dictionary-card:hover { box-shadow:0 3px 12px #205fa216; border-color:var(--tone); }
 .card-top { display:flex; align-items:center; gap:12px; min-height:44px; }
 .entry-icon { width:48px; height:48px; object-fit:contain; flex-shrink:0; }
+.entry-icon > img,.folder-icon > img { width:100%; height:100%; object-fit:contain; }
 .folder-icon { display:flex; align-items:center; justify-content:center; color:var(--tone); width:54px; height:54px; flex-shrink:0; }
 .type-badge { color:var(--tone); background:var(--tint); border-radius:6px; padding:3px 12px; font-size:15px; white-space:nowrap; }
 .icon-button { width:30px; height:30px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }

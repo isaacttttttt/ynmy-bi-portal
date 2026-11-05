@@ -1,16 +1,35 @@
 "use client";
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Drawer } from 'antd';
 import { FolderOpen, ExternalLink } from 'lucide-react';
 import type { Entry, Report } from '@/lib/portal-model';
 import { FavoriteButton, usePortal } from './PortalProvider';
 import ScrollArea from './ScrollArea';
 export function EntryIcon({ entry }: { entry: Entry }) {
-  const [failed, setFailed] = useState(false);
-  if (entry.type === 'folder') return <span className="folder-icon"><FolderOpen size={38} /></span>;
-  if (entry.type === 'url') return <span className="folder-icon"><ExternalLink size={30} /></span>;
+  const container = useRef<HTMLSpanElement>(null);
+  const [loaded, setLoaded] = useState('');
+  const key = `${entry.id}:${entry.iconUrl || ''}`;
+  useEffect(() => {
+    if (!entry.iconUrl || !container.current) return;
+    const url = entry.iconUrl;
+    let cancelled = false;
+    const observer = new IntersectionObserver(records => {
+      if (!records.some(record => record.isIntersecting)) return;
+      observer.disconnect();
+      const image = new Image();
+      image.src = url;
+      void image.decode().then(() => { if (!cancelled) setLoaded(key); }).catch(() => {});
+    });
+    observer.observe(container.current);
+    return () => { cancelled = true; observer.disconnect(); };
+  }, [entry.iconUrl, key]);
   const fallback = entry.type === 'frm' ? '填报' : entry.type === 'cpt' ? '报表' : '驾驶舱';
-  return <img className="entry-icon" src={!failed && entry.iconUrl ? entry.iconUrl : `/assets/${fallback}.png`} alt="" onError={() => setFailed(true)} />;
+  return <span ref={container} className={entry.type === 'folder' || entry.type === 'url' ? 'folder-icon' : 'entry-icon'} aria-hidden="true">
+    {entry.iconUrl && loaded === key ? <img src={entry.iconUrl} alt="" onError={() => setLoaded('')} />
+      : entry.type === 'folder' ? <FolderOpen size={38} />
+      : entry.type === 'url' ? <ExternalLink size={30} />
+      : <img src={`/assets/${fallback}.png`} alt="" />}
+  </span>;
 }
 export function ReportDetails({ report, onClose }: { report: Report | null; onClose: () => void }) {
   const { open } = usePortal();
