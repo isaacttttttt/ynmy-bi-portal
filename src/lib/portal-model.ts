@@ -12,7 +12,7 @@ export interface Report extends Entry {
 }
 export interface Notice {
   id: string; title: string; category: string; pinned: boolean; publishedOn: string;
-  content: string; url?: string;
+  content: string; url?: string; attachment?: { name: string; url: string };
 }
 export interface QuickEntry { id: string; name: string; description: string; url: string | null }
 export interface Bootstrap {

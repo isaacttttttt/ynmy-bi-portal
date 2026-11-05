@@ -5,14 +5,18 @@ import { fileURLToPath } from 'node:url';
 import { createPool } from './config/database.js';
 import { platformClient } from './platform.js';
 import { ApiError, invalid, pageQuery, requireOrigin, searchQuery } from './http.js';
-import { dataAsOf, reportsFor, noticesFor, quickEntries, searchHistory, saveSearch } from './repository.js';
+import * as demoRepository from './repository.js';
+import * as sourceRepository from './source-repository.js';
+import { searchHistory, saveSearch } from './repository.js';
 import { queryReports, paginate, descendants, searchCatalog, searchCategories } from '../../src/lib/portal-model.ts';
 
-export async function buildApp() {
+export async function buildApp({ platform = platformClient(), db = createPool() } = {}) {
   const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
   const rootId = process.env.FINE_ROOT_ID;
   if (!rootId) throw new Error('Missing FINE_ROOT_ID');
-  const platform = platformClient(), db = createPool();
+  const model = process.env.PORTAL_DATA_MODEL || 'demo';
+  if (!['demo','source'].includes(model)) throw new Error('Invalid PORTAL_DATA_MODEL');
+  const { dataAsOf, reportsFor, noticesFor, quickEntries } = model === 'source' ? sourceRepository : demoRepository;
   const app = Fastify({ logger: { level: 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers.set-cookie'] },
     disableRequestLogging: true, genReqId: () => randomUUID(), requestIdHeader: false,
     bodyLimit: 16384, requestTimeout: 15000, ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
