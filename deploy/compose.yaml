@@ -1,0 +1,16 @@
+services:
+  portal:
+    image: ${PORTAL_IMAGE:-ynmy-bi-portal:customer-20261105}
+    restart: unless-stopped
+    ports:
+      - "${PORTAL_HTTP_PORT:-3001}:3001"
+    environment:
+      PORTAL_CONFIG_FILE: /app/config/portal.env
+    volumes:
+      - ./conf:/app/config:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3

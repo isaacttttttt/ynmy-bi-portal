@@ -42,11 +42,11 @@ export function searchQuery(query, withText = false) {
 export function requireOrigin(request, origin) {
   if (request.headers.origin !== origin || request.headers['sec-fetch-site'] === 'cross-site') throw new ApiError(403, 'INVALID_ORIGIN', '请求来源不允许');
 }
-export function cookieToken(request) {
-  const values = (request.headers.cookie || '').split(';').map(v => v.trim()).filter(v => v.startsWith('fine_auth_token='));
+export function cookieToken(request, name = 'fine_auth_token') {
+  const values = (request.headers.cookie || '').split(';').map(v => v.trim()).filter(v => v.startsWith(name + '='));
   if (values.length !== 1) throw new ApiError(401, 'SESSION_EXPIRED', '登录已过期，请重新登录');
   let token;
-  try { token = decodeURIComponent(values[0].slice('fine_auth_token='.length)); } catch { throw invalid(); }
+  try { token = decodeURIComponent(values[0].slice(name.length + 1)); } catch { throw invalid(); }
   if (!/^[\x21-\x7e]{1,4096}$/.test(token)) throw invalid();
   return token;
 }

@@ -9,6 +9,9 @@
 # testing
 /coverage
 /artifacts/qa/
+/artifacts/releases/
+/deploy/conf/portal.env
+/deploy/conf/*.crt
 
 # next.js
 /.next/

@@ -16,6 +16,7 @@ export interface Notice {
 }
 export interface QuickEntry { id: string; name: string; description: string; url: string | null }
 export interface Bootstrap {
+  platform?: { entryAccessUrl: string; biServiceName: string; biTabType: string };
   user: { name: string }; rootId: string; entries: Entry[]; favoriteIds: string[];
   quickEntries: QuickEntry[]; dataAsOf: string;
 }

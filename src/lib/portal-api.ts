@@ -58,19 +58,19 @@ type PlatformWindow = Window & {
   FS?: { tabPane?: { addItem: (item: { title: string; src: string }) => void } };
   BI?: { Services: { getService: (name: string) => { openCustomTab: (title: string, id: string, type: string, options: Record<string, unknown>) => void } } };
 };
-export function openPlatformEntry(entry: Entry) {
+export function openPlatformEntry(entry: Entry, config?: Bootstrap['platform']) {
   let host: PlatformWindow;
   try { host = window.top as PlatformWindow; void host.location.href; }
   catch { throw new Error('门户与帆软平台跨域，请配置同源部署或由平台提供跨域打开桥接接口'); }
   if (entry.type === 'folder') throw new Error('目录需在专题分析中打开');
   if (entry.type === 'bi') {
     if (!entry.templateId || !host.BI?.Services) throw new Error('平台预览接口或发布任务 ID 未就绪');
-    host.BI.Services.getService('dec.service.frame.tab_pane').openCustomTab(entry.name, entry.id, 'bi.subject.publink', {
+    host.BI.Services.getService(config?.biServiceName || 'dec.service.frame.tab_pane').openCustomTab(entry.name, entry.id, config?.biTabType || 'bi.subject.publink', {
       subjectEntryType: 2, publishTaskId: entry.templateId, entryId: entry.id, hideType: 'display',
     });
   } else {
     if (!host.FS?.tabPane) throw new Error('请在帆软平台内打开此报表');
     if (entry.type === 'url' && !entry.url) throw new Error('报表链接未配置');
-    host.FS.tabPane.addItem({ title: entry.name, src: safeUrl(entry.type === 'url' ? entry.url! : `${platformBase}/v10/entry/access/${encodeURIComponent(entry.id)}`) });
+    host.FS.tabPane.addItem({ title: entry.name, src: safeUrl(entry.type === 'url' ? entry.url! : (config?.entryAccessUrl || `${platformBase}/v10/entry/access/{entryId}`).replaceAll('{entryId}', encodeURIComponent(entry.id))) });
   }
 }

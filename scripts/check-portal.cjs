@@ -61,6 +61,10 @@ assert(calls[0].src.endsWith('/v10/entry/access/entry-2'));
 openPlatformEntry(reports.find(r => r.type === 'bi'));
 assert.equal(calls[1][2], 'bi.subject.publink');
 assert.equal(calls[1][3].subjectEntryType, 2);
+openPlatformEntry(reports[1], {entryAccessUrl:'/WebReport/ReportServer/custom/{entryId}',biServiceName:'customer.tabs',biTabType:'customer.bi'});
+assert.equal(calls[2].src,'https://portal.example/WebReport/ReportServer/custom/entry-2');
+openPlatformEntry(reports.find(r => r.type === 'bi'), {entryAccessUrl:'/custom/{entryId}',biServiceName:'customer.tabs',biTabType:'customer.bi'});
+assert.equal(calls[3][2],'customer.bi');
 Object.defineProperty(window.top, 'location', {get:() => {throw new Error('cross origin');}});
 assert.throws(() => openPlatformEntry(reports[1]), /跨域/);
 (async () => {

@@ -48,7 +48,7 @@ export async function buildApp({ platform = platformClient(), db = createPool() 
       const context = request.portal;
       const [favoriteIds, links, asOf] = await Promise.all([platform.favorites(context), quickEntries(db), dataAsOf(db)]);
       const tree = context.ids.has(rootId) ? context.entries.filter(e => e.id === rootId).concat(descendants(context.entries, rootId)) : [];
-      return { success: true, data: { user: { name: context.user.name }, rootId, entries: tree, favoriteIds, quickEntries: links, dataAsOf: asOf } };
+      return { success: true, data: { user: { name: context.user.name }, rootId, entries: tree, favoriteIds, quickEntries: links, dataAsOf: asOf, platform: platform.browser } };
     });
     api.get('/reports', async request => {
       const query = pageQuery(request.query, { reports: true });

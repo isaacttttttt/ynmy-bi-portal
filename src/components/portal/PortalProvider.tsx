@@ -89,7 +89,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }
   function open(entry: Entry) {
     if (demoMode) { setPreview(entry); return; }
-    try { openPlatformEntry(entry); } catch (error) { toast.error((error as Error).message); }
+    try { openPlatformEntry(entry, result.data?.platform); } catch (error) { toast.error((error as Error).message); }
   }
   if (!result.data) return <div className="portal-shell"><div className="startup panel"><h1>云南白药集团 · 数据门户</h1><RequestState {...result} /></div></div>;
   return <PortalContext.Provider value={{ bootstrap: result.data, favorites: currentFavorites, pending, workbench, toggleFavorite, open }}>

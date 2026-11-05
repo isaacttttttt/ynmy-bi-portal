@@ -10,3 +10,4 @@ ssh
 **/.env*
 **/*.log
 .claude
+deploy/conf
