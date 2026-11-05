@@ -1,6 +1,7 @@
 // Runs the real API and SQL against an isolated imported PG database. Only the unavailable platform is stubbed.
 import assert from 'node:assert/strict';
 import pg from 'pg';
+import { readdir } from 'node:fs/promises';
 import { buildApp } from '../src/app.js';
 
 const client = new pg.Client({connectionString:process.env.SOURCE_TEST_DATABASE_URL,ssl:{rejectUnauthorized:false}});
@@ -16,16 +17,22 @@ const {rows:catalog}=await client.query('SELECT report_id,report_name,report_typ
 assert(catalog.length>0);
 const entries=catalog.map(row=>({id:row.report_id,name:row.report_name,type:row.report_type,parentId:'test-root',sort:0}));
 let context={user:{userName:users[0].username,name:'测试用户'},ids:new Set(entries.map(e=>e.id)),entries};
-const platform={context:async()=>context,favorites:async()=>[],favorite:async()=>{}};
-const app=await buildApp({platform,db:{query:(...args)=>client.query(...args),end:async()=>{}}});
+const platform={context:async()=>context,favorites:async()=>[entries[0].id],favorite:async()=>{}};
+let reportQueries=0;
+const app=await buildApp({platform,db:{query:(...args)=>{if(args[0].includes('sum(visit_num'))reportQueries++;return client.query(...args);},end:async()=>{}}});
 let checks=0;
 async function call(path,method='GET',payload,status=200){
  const response=await app.inject({method,url:'/api/portal/v1'+path,headers:{origin:process.env.PUBLIC_ORIGIN},payload});
  assert.equal(response.statusCode,status,`${path}: ${response.body}`);checks++;
+ assert.equal(response.headers['cache-control'],'private, no-store');
  return response.json().data;
 }
 try{
  await client.query('BEGIN');
+ const chunk=(await readdir(new URL('../../out/_next/static/chunks/',import.meta.url))).find(name=>name.endsWith('.js'));
+ for(const [url,cache] of [['/assets/company_title.png','public, max-age=3600'],['/_next/static/chunks/'+chunk,'public, max-age=31536000, immutable'],['/','private, no-store']]){
+   const response=await app.inject({url});assert.equal(response.statusCode,200);assert.equal(response.headers['cache-control'],cache);
+ }
  const bootstrap=await call('/bootstrap');assert.equal(bootstrap.dataAsOf,'2026-11-05');
  const enabledLinks=Number((await client.query('SELECT count(*) FROM fr_quick_entry_app WHERE status=1')).rows[0].count);
  assert.equal(bootstrap.quickEntries.length,enabledLinks);
@@ -54,13 +61,16 @@ try{
  const target=reports.items[0];
  const found=await call('/search?category=all&q='+encodeURIComponent(target.name));assert(found.items.some(item=>item.report?.id===target.id));
  for(const category of ['report','tag','metric'])await call('/search?category='+category+'&q=');
- for(const tab of ['recent','frequent','favorites'])await call('/workbench?tab='+tab);
+ const beforeSnapshot=reportQueries;
+ const snapshot=await call('/workbench/snapshot');assert.equal(reportQueries-beforeSnapshot,1,'One log aggregation for all three tabs');
+ for(const tab of ['recent','frequent','favorites'])assert.deepEqual(snapshot[tab].slice(0,100),(await call('/workbench?tab='+tab+'&pageSize=100')).items);
  const notices=await call('/notices?pageSize=100');assert.equal(notices.total,5);assert(notices.items.every(n=>n.attachment?.url.startsWith('https://')));
  const authorized=context;
  context={...authorized,entries:entries.map((e,i)=>i===0?{...e,type:'folder'}:e)};
  assert.equal((await call('/reports')).total,entries.length-1,'Platform folders are not dictionary reports');
  context={...authorized,ids:new Set(),entries:[]};
  assert.equal((await call('/reports')).total,0);assert.equal((await call('/search?category=all&q=')).total,0);
+ assert.deepEqual(await call('/workbench/snapshot'),{recent:[],frequent:[],favorites:[]});
  assert.equal((await call('/notices')).total,5,'Notice permissions depend on OA department, not report tree');
  context={user:{userName:'__portal_no_such_user__',name:'未匹配用户'},ids:authorized.ids,entries};
  assert.equal((await call('/notices')).total,0);

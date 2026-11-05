@@ -21,7 +21,14 @@ export async function buildApp({ platform = platformClient(), db = createPool() 
     disableRequestLogging: true, genReqId: () => randomUUID(), requestIdHeader: false,
     bodyLimit: 16384, requestTimeout: 15000, ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
   app.addHook('onClose', () => db.end());
-  app.addHook('onSend', async (request, reply) => { reply.header('Cache-Control', 'private, no-store'); reply.header('X-Content-Type-Options', 'nosniff'); reply.header('X-Request-Id', request.id); });
+  app.addHook('onSend', async (request, reply) => {
+    const path = request.url.split('?')[0];
+    const cache = reply.statusCode === 200 && request.routeOptions.url === '/*'
+      ? path.startsWith('/_next/static/') ? 'public, max-age=31536000, immutable'
+        : path.startsWith('/assets/') ? 'public, max-age=3600' : 'private, no-store'
+      : 'private, no-store';
+    reply.header('Cache-Control', cache); reply.header('X-Content-Type-Options', 'nosniff'); reply.header('X-Request-Id', request.id);
+  });
   app.addHook('onResponse', async (request, reply) => { app.log.info({ requestId: request.id, route: request.routeOptions.url, method: request.method, status: reply.statusCode }, 'request'); });
   app.setErrorHandler((error, request, reply) => {
     const status = error instanceof ApiError ? error.statusCode : error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : /^[0-9A-Z]{5}$/.test(error.code || '') || ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code) || error.message === 'Query read timeout' ? 503 : 500;
@@ -50,10 +57,13 @@ export async function buildApp({ platform = platformClient(), db = createPool() 
     api.get('/workbench', async request => {
       const query = pageQuery(request.query, { workbench: true, defaultSize: 8 });
       const [reports, favorites] = await Promise.all([reportsFor(db, request.portal), query.tab === 'favorites' ? platform.favorites(request.portal) : []]);
-      const items = reports.filter(r => r.status === 'active' && (query.tab === 'favorites' ? favorites.includes(r.id) : query.tab === 'recent' ? r.lastVisitedOn : r.visits30d > 0));
-      if (query.tab === 'recent') items.sort((a, b) => b.lastVisitedOn.localeCompare(a.lastVisitedOn) || a.id.localeCompare(b.id));
-      if (query.tab === 'frequent') items.sort((a, b) => b.visits30d - a.visits30d || a.id.localeCompare(b.id));
+      const items = workbenchItems(reports, favorites, query.tab);
       return { success: true, data: paginate(items, query.page, query.pageSize) };
+    });
+    api.get('/workbench/snapshot', async request => {
+      if (Object.keys(request.query).length) throw invalid();
+      const [reports, favorites] = await Promise.all([reportsFor(db, request.portal), platform.favorites(request.portal)]);
+      return { success: true, data: Object.fromEntries(['recent', 'frequent', 'favorites'].map(tab => [tab, workbenchItems(reports, favorites, tab)])) };
     });
     api.get('/search', async request => {
       const { category, q } = searchQuery(request.query, true);
@@ -114,4 +124,11 @@ export async function buildApp({ platform = platformClient(), db = createPool() 
   await app.register(staticFiles, { root: fileURLToPath(new URL('../../out/', import.meta.url)), index: ['index.html'] });
   try { await db.query('SELECT 1'); } catch (error) { await app.close(); throw error; }
   return app;
+}
+
+function workbenchItems(reports, favorites, tab) {
+  const items = reports.filter(r => r.status === 'active' && (tab === 'favorites' ? favorites.includes(r.id) : tab === 'recent' ? r.lastVisitedOn : r.visits30d > 0));
+  if (tab === 'recent') items.sort((a, b) => b.lastVisitedOn.localeCompare(a.lastVisitedOn) || a.id.localeCompare(b.id));
+  if (tab === 'frequent') items.sort((a, b) => b.visits30d - a.visits30d || a.id.localeCompare(b.id));
+  return items;
 }

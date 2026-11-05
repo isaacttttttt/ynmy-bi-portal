@@ -70,13 +70,13 @@ assert.throws(() => openPlatformEntry(reports[1]), /跨域/);
   await assert.rejects(request('/reports'), /服务暂时不可用/);
   global.fetch = async () => ({ok:true,status:200,json:async()=>({success:true,data:{items:[]}})});
   assert.deepEqual(await request('/reports'),{items:[]});
+  let workbenchRequests=0;
+  const snapshot={recent:[{id:'recent-1'}],frequent:[{id:'frequent-1'}],favorites:[{id:'favorite-1'}]};
   global.fetch = async path => {
-    const params = new URL(path,'https://portal.example').searchParams;
-    const page = Number(params.get('page'));
-    const items = Array.from({length:5},(_,i)=>({id:`${params.get('tab')}-${i}`})).slice((page-1)*2,page*2);
-    return {ok:true,status:200,json:async()=>({success:true,data:{items,total:5,page,pageSize:2}})};
+    workbenchRequests++;assert.equal(path,'/api/portal/v1/workbench/snapshot');
+    return {ok:true,status:200,json:async()=>({success:true,data:snapshot})};
   };
   const workbench = await loadWorkbench('/workbench');
-  for (const tab of ['recent','frequent','favorites']) assert.deepEqual(workbench[tab].map(r=>r.id),Array.from({length:5},(_,i)=>`${tab}-${i}`));
+  assert.deepEqual(workbench,snapshot);assert.equal(workbenchRequests,1);
   console.log('Portal checks passed: queries, facets, tree, favorites, dates, links, HTTP errors, platform bridge.');
 })().catch(error => {console.error(error); process.exitCode = 1;});

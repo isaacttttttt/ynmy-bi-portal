@@ -9,7 +9,7 @@ export async function dataAsOf(db) {
 export async function reportsFor(db, context) {
   if (!context.ids.size) return [];
   const asOf = await dataAsOf(db);
-  const { rows } = await db.query(`SELECT r.*, d.report_name AS dictionary_name, d.report_description,
+  const { rows } = await db.query(`SELECT r.report_id, d.report_name AS dictionary_name, d.report_description,
       d.business_domain, d.belonging_department, d.suggested_owner_name, d.developer_name,
       d.update_cycle, d.go_live_time::date::text AS online_on, d.usage_scenario,
       d.core_metrics, d.metrics_calc_logic, d.data_source,

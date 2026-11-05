@@ -40,6 +40,7 @@ export function reportPath(q: string, filters: Filters, page: number, category: 
   return `/reports?${params}`;
 }
 export async function loadWorkbench(path: string, signal?: AbortSignal): Promise<WorkbenchData> {
+  if (!demoMode) return request<WorkbenchData>(`${path}/snapshot`, signal);
   const tabs: WorkbenchTab[] = ['recent', 'frequent', 'favorites'];
   const lists = await Promise.all(tabs.map(async tab => {
     const first = await request<Page<Report>>(`${path}?tab=${tab}&page=1&pageSize=100`, signal);
