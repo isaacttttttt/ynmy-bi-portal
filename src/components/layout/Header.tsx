@@ -24,7 +24,7 @@ export default function Header({ searchKeyword, onSearchChange }: HeaderProps) {
           >
             <div className="relative w-[120px] h-[80px]">
               <Image
-                src="/assets/logo.png"
+                src="/portal/assets/logo.png"
                 alt="云南白药"
                 fill
                 className="object-contain"

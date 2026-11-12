@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { serialize } from 'node:v8';
 import { ApiError, cookieToken, publicUrl } from './http.js';
 
 const upstreamError = () => new ApiError(502, 'PLATFORM_UNAVAILABLE', '帆软平台暂时不可用，请重试');
@@ -32,12 +34,23 @@ export function platformClient(env = process.env, db) {
   if (!publicUrl(entryAccessUrl) || !entryAccessUrl.includes('{entryId}')) throw new Error('Invalid FINE_ENTRY_ACCESS_PATH');
   const iconTemplate = env.FINE_ICON_URL_TEMPLATE || '';
   if (iconTemplate && (!publicUrl(iconTemplate) || !iconTemplate.includes('{entryId}'))) throw new Error('Invalid FINE_ICON_URL_TEMPLATE');
-  async function call(token, path, method = 'GET') {
+  const ttlMs = Number(env.FINE_TREE_CACHE_TTL_SECONDS ?? 60) * 1000;
+  const maxEntries = Number(env.FINE_TREE_CACHE_MAX_ENTRIES ?? 0);
+  const maxBytes = Number(env.FINE_TREE_CACHE_MAX_MB ?? 512) * 1024 * 1024;
+  if (!Number.isSafeInteger(ttlMs) || ttlMs < 0 || ttlMs > 2147483647 ||
+      !Number.isSafeInteger(maxEntries) || maxEntries < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new Error('Invalid tree cache limits');
+  }
+  const trees = new Map(), pendingTrees = new Map();
+  let cachedBytes = 0;
+  async function call(token, path, method = 'GET', log, operation) {
+    const started = Date.now();
     try {
       const response = await fetch(/^https?:\/\//.test(path) ? path : base.href.replace(/\/$/, '') + path, {
         method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         signal: AbortSignal.timeout(5000), redirect: 'error',
       });
+      log?.info({ stage: 'platform', operation, method, status: response.status, durationMs: Date.now() - started }, 'platform response');
       if (response.status === 401) throw new ApiError(401, 'SESSION_EXPIRED', '登录已过期，请重新登录');
       if (response.status === 403) throw new ApiError(403, 'FORBIDDEN', '当前账号没有访问权限');
       if (!response.ok) throw upstreamError();
@@ -46,46 +59,110 @@ export function platformClient(env = process.env, db) {
       const body = JSON.parse(text);
       if (!body || body.errorCode || body.success === false || !Object.hasOwn(body, 'data')) throw upstreamError();
       return body.data;
-    } catch (error) { if (error instanceof ApiError) throw error; throw upstreamError(); }
+    } catch (error) {
+      log?.error({ stage: 'platform', operation, code: error instanceof ApiError ? error.code : 'PLATFORM_UNAVAILABLE' }, 'platform request failed');
+      if (error instanceof ApiError) throw error; throw upstreamError();
+    }
+  }
+  function removeTree(key) {
+    const entry = trees.get(key);
+    if (!entry) return;
+    clearTimeout(entry.timer); cachedBytes -= entry.bytes; trees.delete(key);
+  }
+  async function loadTree(token, log) {
+    const rows = await call(token, paths.tree, 'GET', log, 'tree');
+    if (!Array.isArray(rows) || rows.length > 10000) throw upstreamError();
+    const ids = new Set();
+    const entries = rows.map(row => {
+      if (!row || !validId(row.id) || ids.has(row.id) || (row.pId !== null && !validId(row.pId)) || typeof row.text !== 'string' || (row.path !== null && typeof row.path !== 'string')) throw upstreamError();
+      ids.add(row.id);
+      const path = row.path?.toLowerCase() || '';
+      const type = String(row.entryType) === '5' ? 'url' : row.path === null ? 'folder' : /\.fvs(?:$|[?/#])/.test(path) ? 'fvs' : /\.frm(?:$|[?/#])/.test(path) ? 'frm' : /\.cpt(?:$|[?/#])/.test(path) ? 'cpt' : 'bi';
+      if (type === 'bi' && !validId(row.templateId)) throw upstreamError();
+      if (type === 'url' && !publicUrl(row.path)) throw upstreamError();
+      return { id: row.id, parentId: row.pId, name: row.text, type, sort: Number(row.sortIndex) || 0,
+        ...(type === 'bi' ? { templateId: row.templateId } : {}), ...(type === 'url' ? { url: row.path } : {}),
+        ...(iconTemplate ? { iconUrl: iconTemplate.replaceAll('{entryId}', encodeURIComponent(row.id)) } : {}) };
+    });
+    return { entries, ids };
+  }
+  async function permissionTree(token, log) {
+    const key = createHash('sha256').update(token).digest('hex');
+    const cached = trees.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      trees.delete(key); trees.set(key, cached);
+      log?.info({ stage: 'tree-cache', result: 'hit', sessions: trees.size, serializedBytes: cachedBytes }, 'tree cache');
+      return cached.value;
+    }
+    removeTree(key);
+    if (pendingTrees.has(key)) {
+      log?.info({ stage: 'tree-cache', result: 'shared' }, 'tree cache');
+      return pendingTrees.get(key);
+    }
+    log?.info({ stage: 'tree-cache', result: 'miss' }, 'tree cache');
+    const pending = loadTree(token, log).then(value => {
+      if (!ttlMs) return value;
+      // Serialized size is a retention budget, not a limit on V8 heap or request working memory.
+      const bytes = serialize(value).byteLength;
+      if (bytes > maxBytes) {
+        log?.info({ stage: 'tree-cache', result: 'oversized', serializedBytes: bytes }, 'tree cache');
+        return value;
+      }
+      while ((maxEntries > 0 && trees.size >= maxEntries) || cachedBytes + bytes > maxBytes) removeTree(trees.keys().next().value);
+      const timer = setTimeout(removeTree, ttlMs, key); timer.unref();
+      trees.set(key, { value, bytes, expiresAt: Date.now() + ttlMs, timer }); cachedBytes += bytes;
+      log?.info({ stage: 'tree-cache', result: 'stored', sessions: trees.size, serializedBytes: cachedBytes }, 'tree cache');
+      return value;
+    }).finally(() => pendingTrees.delete(key));
+    pendingTrees.set(key, pending);
+    return pending;
   }
   return {
+    close() { for (const key of trees.keys()) removeTree(key); },
     browser: { entryAccessUrl, biServiceName: env.FINE_BI_SERVICE_NAME || 'dec.service.frame.tab_pane', biTabType: env.FINE_BI_TAB_TYPE || 'bi.subject.publink' },
     async context(request) {
+      const log = request.log?.child({ requestId: request.id });
+      log?.info({ stage: 'identity', mode: identityMode, tokenCookie: cookieName, userCookie: userCookieName }, 'resolving identity');
       const token = cookieToken(request, cookieName);
-      const userId = identityMode === 'trusted-cookie' ? cookieToken(request, userCookieName) : null;
-      if (userId && !validId(userId)) throw new ApiError(401, 'INVALID_IDENTITY', '平台用户标识无效');
-      let user = identityMode === 'session' ? await call(token, paths.session) : null;
-      const rows = await call(token, paths.tree);
-      if (!Array.isArray(rows) || rows.length > 10000) throw upstreamError();
+      const identity = identityMode === 'trusted-cookie' ? platformIdentity(token, cookieToken(request, userCookieName)) : null;
+      log?.info({ stage: 'identity', mode: identityMode, candidateCount: identity?.ids.length }, 'identity parsed');
+      let user = identityMode === 'session' ? await call(token, paths.session, 'GET', log, 'session') : null;
+      const { entries, ids } = await permissionTree(token, log);
       if (identityMode === 'trusted-cookie') {
         // The trusted gateway must validate both cookies and their user binding before proxying here.
         const { rows: users } = await db.query(`SELECT username AS "userName", coalesce(nullif(realname,''),username) AS name
-          FROM dim_bi_user WHERE id=$1 AND enable='true' LIMIT 2`, [userId]);
+          FROM dim_bi_user WHERE id=ANY($1::text[]) AND enable='true'
+            AND ($2::text IS NULL OR username=$2) LIMIT 2`, [identity.ids, identity.username]);
+        log?.info({ stage: 'identity', matchedUsers: users.length, username: users.length === 1 ? users[0].userName : undefined }, 'identity lookup');
         if (users.length !== 1) throw new ApiError(403, 'USER_UNAVAILABLE', '平台用户未同步或已停用');
         user = users[0];
       }
       if (!user || typeof user.userName !== 'string' || !user.userName || user.userName.length > 128 || typeof user.name !== 'string') throw upstreamError();
-      const ids = new Set();
-      const entries = rows.map(row => {
-        if (!row || !validId(row.id) || ids.has(row.id) || (row.pId !== null && !validId(row.pId)) || typeof row.text !== 'string' || (row.path !== null && typeof row.path !== 'string')) throw upstreamError();
-        ids.add(row.id);
-        const path = row.path?.toLowerCase() || '';
-        const type = String(row.entryType) === '5' ? 'url' : row.path === null ? 'folder' : /\.fvs(?:$|[?/#])/.test(path) ? 'fvs' : /\.frm(?:$|[?/#])/.test(path) ? 'frm' : /\.cpt(?:$|[?/#])/.test(path) ? 'cpt' : 'bi';
-        if (type === 'bi' && !validId(row.templateId)) throw upstreamError();
-        if (type === 'url' && !publicUrl(row.path)) throw upstreamError();
-        return { id: row.id, parentId: row.pId, name: row.text, type, sort: Number(row.sortIndex) || 0,
-          ...(type === 'bi' ? { templateId: row.templateId } : {}), ...(type === 'url' ? { url: row.path } : {}),
-          ...(iconTemplate ? { iconUrl: iconTemplate.replaceAll('{entryId}', encodeURIComponent(row.id)) } : {}) };
-      });
-      return { token, user, entries, ids };
+      return { token, user, entries, ids, log };
     },
     async favorites(context) {
-      const rows = await call(context.token, paths.favorites);
+      const rows = await call(context.token, paths.favorites, 'GET', context.log, 'favorites');
       if (!Array.isArray(rows) || rows.some(r => !r || !validId(r.id))) throw upstreamError();
       return [...new Set(rows.map(r => r.id).filter(id => context.ids.has(id)))];
     },
     async favorite(context, id, value) {
-      if (await call(context.token, (value ? paths.add : paths.remove).replaceAll('{entryId}', encodeURIComponent(id)), value ? addMethod : removeMethod) !== 'success') throw upstreamError();
+      if (await call(context.token, (value ? paths.add : paths.remove).replaceAll('{entryId}', encodeURIComponent(id)), value ? addMethod : removeMethod, context.log, value ? 'favorite-add' : 'favorite-remove') !== 'success') throw upstreamError();
     },
   };
+}
+
+function platformIdentity(token, cookie) {
+  const ids = [...new Set(cookie.split(',').map(id => id.trim()))];
+  if (ids.some(id => !id || id.length > 1024 || /[\x00-\x1f\x7f]/.test(id))) {
+    throw new ApiError(401, 'INVALID_IDENTITY', '平台用户标识格式无效');
+  }
+  if (ids.length === 1) return { ids, username: null };
+  // The gateway verifies the token. Its subject selects the current account from the remembered ID list.
+  let username;
+  try { username = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).sub; }
+  catch { throw new ApiError(401, 'INVALID_IDENTITY', '平台包含多个用户，但无法解析当前登录账号'); }
+  if (typeof username !== 'string' || !username || username.length > 1024) {
+    throw new ApiError(401, 'INVALID_IDENTITY', '平台包含多个用户，但缺少当前登录账号');
+  }
+  return { ids, username };
 }

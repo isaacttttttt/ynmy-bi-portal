@@ -25,7 +25,7 @@ export default function ThematicAnalysisModule() {
       <button aria-current={currentId === bootstrap.rootId ? 'page' : undefined} onClick={() => setFolderId(bootstrap.rootId)}>全部专题</button>
       {path.map((e, i) => <span key={e.id}><ChevronRight size={13} /><button aria-current={i === path.length - 1 ? 'page' : undefined} onClick={() => setFolderId(e.id)}>{e.name}</button></span>)}
     </nav>}
-    <ScrollArea key={currentId} label="专题目录列表">{visible.length ? <div className="topic-grid">{visible.map((entry, i) => <article key={entry.id} className={`topic-card tone-${themeFor(entry.type)}`} style={{ backgroundImage: `url('/assets/${entry.type === 'folder' ? '专题分析专题背景' : `专题分析驾驶舱背景${i % 3 + 1}`}.png')` }}>
+    <ScrollArea key={currentId} label="专题目录列表">{visible.length ? <div className="topic-grid">{visible.map((entry, i) => <article key={entry.id} className={`topic-card tone-${themeFor(entry.type)}`} style={{ backgroundImage: `url('/portal/assets/${entry.type === 'folder' ? '专题分析专题背景' : `专题分析驾驶舱背景${i % 3 + 1}`}.png')` }}>
       <button className="topic-main" onClick={() => entry.type === 'folder' ? setFolderId(entry.id) : open(entry)}>
         <EntryIcon entry={entry} /><div><h3>{entry.name}</h3><p><span className="type-badge">{typeLabel[entry.type]}</span>{entry.type === 'folder' && <span>{entries.filter(e => e.parentId === entry.id).length} 个对象</span>}</p></div><ChevronRight className="topic-arrow" size={17} />
       </button>{entry.type !== 'folder' && <FavoriteButton entry={entry} />}

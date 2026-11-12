@@ -1,13 +1,14 @@
 # 数据门户接口契约 v1
 
-本契约已由 `backend/src/app.js` 实现，并用于 Railway 测试部署。原有 `/api/reports` 等旧原型路由不再注册。当前连接 PostgreSQL 测试底表和独立帆软模拟服务；真实底表、真实帆软会话仍需联调。部署、数据库适配和验收方法见 [后端交接](BACKEND_HANDOFF.md)。
+本契约由 `backend/src/app.js` 实现。本次将入口迁移至 `/portal/`，部署时需同时更新前后端镜像及代理配置；文档不代表线上环境已更新。部署、数据库适配和验收方法见 [后端交接](BACKEND_HANDOFF.md)。
 
 ## 接入约定
 
-- 基础路径：`/api/portal/v1`，通过 `NEXT_PUBLIC_PORTAL_API_BASE` 指定。
+- 基础路径：`/portal/api/portal/v1`，通过 `NEXT_PUBLIC_PORTAL_API_BASE` 指定。
 - 前端静态导出，由帆软页面以 iframe 嵌入。推荐门户、BFF、帆软通过反向代理同源部署。
 - `NEXT_PUBLIC_PORTAL_MODE=demo` 使用浏览器内模拟接口；`api` 使用真实 HTTP。真实接口失败时显示错误，绝不降级为演示数据。
 - 身份来自服务端验证的当前平台会话。请求使用 `credentials: include`，不接收浏览器自报的 `userId` 或权限集合。不把平台 token 写入 URL、localStorage 或日志。
+- 客户的 `trusted-cookie` 模式沿用主平台校验：`fine_login_users` 对应 `dim_bi_user.id`；包含多个 ID 时，用当前 token 的 `sub` 匹配其中用户的 `username`。访问记录通过 `dim_bi_visit_log.user_code = dim_bi_user.username` 查询。
 - 写请求须由 BFF 校验同源 Origin / CSRF，CORS 不得使用通配来源并允许携带凭据。
 - ID 均为字符串：`Entry.id` 是帆软目录/模板入口 ID；`Report.metadataId` 是底表自增主键，不能混用。BI 的 `templateId` 是发布任务 ID，不是入口 ID。
 - 日期使用 `YYYY-MM-DD`，精确时间若以后提供则使用带时区的 ISO 8601。业务日期以 Asia/Shanghai 计算。不存在的日期返回 `null`，不可伪造时间。
@@ -30,17 +31,17 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 
 ## 权限处理顺序
 
-每次请求先验证会话，由 BFF 以当前用户身份调用 `/v10/view/entry/tree`。失败时拒绝请求，不能使用全量目录或管理员身份回退。
+每次请求解析当前会话并确认用户状态。BFF 按 token 摘要缓存 `/v10/view/entry/tree` 的目录和授权 ID，默认 60 秒；同一会话并发获取时共用一次平台请求。到期后重新获取，失败则拒绝请求，不使用过期目录或管理员身份回退。不同会话、不同门户节点的缓存独立。
 
 1. 基于 tree 的实际返回项构造可见入口 ID 集合。拿到目录本身不等于得到所有未返回子项的权限。
-2. 报表字典、最近、常用、收藏与此集合取交集。专题仅返回配置的 `rootId` 下已授权的所有层级。权限集合必须来自完整授权树，不能只用专题子树过滤全站公告和字典。
-3. 公告解析 `notice_region_id` 的逗号分隔 ID，去空白后做精确集合匹配；命中任一可见 ID 才可见。禁止子串匹配。未配置权限范围默认不公开；如需全员公告，增加明确的全员标记。
+2. 最近、常用、收藏与此集合取交集。报表字典以 `dim_bi_report_dictionary` 为主表，LEFT JOIN `dim_bi_report_info_dtl`，根据 `report_id` 是否在此集合中标记 `granted/denied`，未授权字典记录也展示。专题仅返回配置的 `rootId` 下已授权的所有层级。权限集合必须来自完整授权树，不能只用专题子树过滤全站公告和字典。
+3. 客户底表模式的公告使用当前 username 定位启用的 `dim_bi_user`，再按 `oa_dept_code = dim_dept_mapping.dept_job_id` INNER JOIN。映射得到的 `dept_name` 与公告 `notice_dept_name` 拆分后的部门名称精确匹配；不依赖 tree 权限。重复部门映射不重复返回公告。
 4. 公告同时检查生效时间、过期时间；置顶不绕过权限和有效期。日期边界需使用上海业务日，结束日当天包含在内。
-5. 搜索、筛选计数、排序、总数、分页均在权限过滤之后进行，避免通过数量或分页泄露无权数据。单条打开、收藏写入也必须重新鉴权。
+5. 搜索下拉层仍只检索授权报表；字典页的检索、筛选计数、排序和分页覆盖字典全部记录，可按权限状态筛选。单条打开、收藏写入也必须重新鉴权。
 
 ## GET /bootstrap
 
-返回登录上下文、专题授权树、收藏 ID、启用的快捷入口与数据日期。树是扁平结构，父子关系用 ID，不能按名称或拼接路径关联。树中可包含模板尚无元数据的条目，专题仍可显示；字典只显示成功关联元数据的条目。
+返回登录上下文、专题授权树、收藏 ID、启用的快捷入口与数据日期。树是扁平结构，父子关系用 ID，不能按名称或拼接路径关联。树中可包含模板尚无元数据的条目，专题仍可显示；字典显示全部字典记录，缺少明细或平台授权仍保留说明，未授权记录禁用打开和收藏。
 
 ```json
 {
@@ -61,7 +62,11 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 
 `Entry.type` 枚举：`folder | bi | fvs | frm | cpt | url`。`iconUrl` 可选，提供 HTTPS 图片地址。`url` 类型必须提供 `url`。图标请求失败使用类型默认切图。`sort` 数值升序，事业群默认选择根目录下排序第一的文件夹；目录为空显示空态，不伪造事业群。
 
+快捷入口不按用户、部门或 tree 做行权限过滤，只返回 `fr_quick_entry_app.status=1`，按 `sort_no` 升序、`app_id` 升序排列。
+
 快捷入口 `url:null` 表示尚未配置，前端显示“待配置”，不链接到不存在的本地页面。只接受 HTTP(S)；内网站点相对路径按门户同源解析。BFF 应校验业务允许的链接来源。
+
+快捷入口 `iconUrl` 来自 `fr_quick_entry_app.icon_url`，为空时使用本地默认图标；有值时先显示默认图标，再懒加载指定 URL，失败后保留默认图标。
 
 ## GET /reports
 
@@ -70,7 +75,7 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 | q | string / 空 | 去前后空格，最多200字符；检索名称、描述、指标、Owner、数据源；英文忽略大小写 |
 | category | string / all | `all` 综合检索报表、业务模块和指标；`report` 按上述字段检索；`tag` 只查业务模块；`metric` 只查 core_metrics |
 | organization | 重复 query 参数 | 所属组织，取 `report_owner_dept`，空值显示“暂未维护” |
-| permission | 重复 query 参数 | `granted`（有访问权限）；未授权报表完全隐藏 |
+| permission | 重复 query 参数 | `granted`（有访问权限）、`denied`（无访问权限）；默认同时展示 |
 | status | 重复 query 参数 | `active`、`archived` |
 | frequency | 重复 query 参数 | `实时`、`T+1`、`周更新`、`月更新`；底表其他值须规范化 |
 | volume | 重复 query 参数 | `high`：>1000，`medium`：100–1000，`low`：<100；均为累计访问量 |
@@ -116,7 +121,7 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 
 用户身份只取已验证会话，不能传 userId。读、写、清空均限定当前用户和类别；PUT 和 DELETE 校验同源 Origin。仅确认搜索、点击历史或选择结果时保存，不记录每次键入。关键词最多200字符，空白折叠并去首尾空白，空词拒绝保存；英文忽略大小写去重，重复搜索更新显示文本和时间。每人每类保留最近20条。`searchedAt` 为 UTC ISO 8601，按时间降序、标准化关键词升序稳定排序。
 
-表 `portal_search_history` 在 `backend/sql/003-search-history.sql` 定义。主键 `(user_code,category,query_key)` 负责去重；索引 `(user_code,category,searched_at DESC,query_key)` 支持最近列表、清空和保留条数查询。不记录会话令牌，不输出查询文本到请求日志。业务底表账号只对此表额外获得读写权限，其余业务表仍只读。
+表 `portal_search_history` 在 `backend/sql/003-search-history.sql` 定义。主键 `(user_code,category,query_key)` 负责去重；索引 `(user_code,category,searched_at DESC,query_key)` 支持最近列表、清空和保留条数查询。请求日志包含搜索参数，token、Cookie 值及密码字段不落盘。`PORTAL_LOG_FILE` 指定 JSON 行日志文件，未配置则输出到容器标准输出。业务底表账号只对此表额外获得读写权限，其余业务表仍只读。
 
 ## GET /workbench
 
@@ -181,4 +186,4 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 | `collect_list` 生成路径的顺序不稳定 | 按目录深度重建有序路径；前端仍以 ID 父子关系为准 |
 | 公告权限是逗号字符串，日期也是字符串 | 精确拆分 ID；统一日期格式、空范围默认不公开，确认是否需要全员标记 |
 
-实时权限始终从帆软当前用户树获取；T+1 元数据、访问日志不得作为权限依据。
+权限来源是帆软当前用户树，默认缓存最多 60 秒，权限变更及会话撤销可能有相应延迟；T+1 元数据、访问日志不得作为权限依据。`FINE_TREE_CACHE_TTL_SECONDS=0` 可关闭持续缓存，保留并发请求合并。缓存同时受 `FINE_TREE_CACHE_MAX_MB`（每节点默认 512 MiB 序列化数据）限制；`FINE_TREE_CACHE_MAX_ENTRIES` 默认 0，不额外限制会话数量，正整数则增加数量限制；超限淘汰最久未使用的会话，单份超限则只返回、不缓存。

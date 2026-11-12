@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { platformClient } from '../src/platform.js';
 import { buildApp } from '../src/app.js';
+import { readdir } from 'node:fs/promises';
 
 const calls = [];
 const server = createServer((req, res) => {
@@ -33,9 +34,26 @@ try {
   process.env.PUBLIC_ORIGIN = 'https://customer.example'; process.env.FINE_ROOT_ID = 'report-1'; process.env.PORTAL_DATA_MODEL = 'source';
   delete process.env.POC_PLATFORM_URL;
   app = await buildApp({ platform, db: { query: async sql => ({ rows: sql.includes('max(day_id)') ? [{ day: '2026-11-05' }] : [] }), end: async () => {} } });
-  const response = await app.inject({ url: '/api/portal/v1/bootstrap', headers: { cookie: 'customer_token=verified-token' } });
+  const response = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: { cookie: 'customer_token=verified-token' } });
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json().data.platform, { entryAccessUrl: '/WebReport/ReportServer/open/{entryId}', biServiceName: 'dec.service.frame.tab_pane', biTabType: 'bi.subject.publink' });
   assert(!response.body.includes('verified-token')); assert(!response.body.includes(base));
+  const redirect = await app.inject('/portal?q=hello');
+  assert.equal(redirect.statusCode, 308);
+  assert.equal(redirect.headers.location, '/portal/?q=hello');
+  const chunk = (await readdir(new URL('../../out/_next/static/chunks/', import.meta.url))).find(file => file.endsWith('.js'));
+  for (const [url, cache] of [
+    ['/portal/', 'private, no-store'],
+    ['/portal/report-dictionary/', 'private, no-store'],
+    ['/portal/assets/company_title.png', 'public, max-age=3600'],
+    [`/portal/_next/static/chunks/${chunk}`, 'public, max-age=31536000, immutable'],
+  ]) {
+    const resource = await app.inject(url);
+    assert.equal(resource.statusCode, 200, url);
+    assert.equal(resource.headers['cache-control'], cache, url);
+  }
+  for (const url of ['/', '/assets/company_title.png', '/api/portal/v1/bootstrap', '/portal/api/portal/v1/missing']) {
+    assert.equal((await app.inject(url)).statusCode, 404, url);
+  }
   console.log('PASS: custom endpoints, methods, cookie, icon template, public runtime config and permission filtering.');
 } finally { if (app) await app.close(); await new Promise(resolve => server.close(resolve)); }

@@ -22,7 +22,7 @@ let reportQueries=0;
 const app=await buildApp({platform,db:{query:(...args)=>{if(args[0].includes('sum(visit_num'))reportQueries++;return client.query(...args);},end:async()=>{}}});
 let checks=0;
 async function call(path,method='GET',payload,status=200){
- const response=await app.inject({method,url:'/api/portal/v1'+path,headers:{origin:process.env.PUBLIC_ORIGIN},payload});
+ const response=await app.inject({method,url:'/portal/api/portal/v1'+path,headers:{origin:process.env.PUBLIC_ORIGIN},payload});
  assert.equal(response.statusCode,status,`${path}: ${response.body}`);checks++;
  assert.equal(response.headers['cache-control'],'private, no-store');
  return response.json().data;
@@ -30,17 +30,18 @@ async function call(path,method='GET',payload,status=200){
 try{
  await client.query('BEGIN');
  const chunk=(await readdir(new URL('../../out/_next/static/chunks/',import.meta.url))).find(name=>name.endsWith('.js'));
- for(const [url,cache] of [['/assets/company_title.png','public, max-age=3600'],['/_next/static/chunks/'+chunk,'public, max-age=31536000, immutable'],['/','private, no-store']]){
+ for(const [url,cache] of [['/portal/assets/company_title.png','public, max-age=3600'],['/portal/_next/static/chunks/'+chunk,'public, max-age=31536000, immutable'],['/portal/','private, no-store']]){
    const response=await app.inject({url});assert.equal(response.statusCode,200);assert.equal(response.headers['cache-control'],cache);
  }
  const bootstrap=await call('/bootstrap');assert.equal(bootstrap.dataAsOf,'2026-11-05');
  const enabledLinks=Number((await client.query('SELECT count(*) FROM fr_quick_entry_app WHERE status=1')).rows[0].count);
  assert.equal(bootstrap.quickEntries.length,enabledLinks);
- const reports=await call('/reports?pageSize=100');assert.equal(reports.total,entries.length);
- const seen=new Set(reports.items.map(r=>r.id));
+ const dictionaryCount=Number((await client.query('SELECT count(*) FROM dim_bi_report_dictionary')).rows[0].count);
+ const reports=await call('/reports?pageSize=100');assert.equal(reports.total,dictionaryCount);
+ const seen=new Set(reports.items.map(r=>r.metadataId));
  const full=[...reports.items];
- for(let page=2;page<=Math.ceil(reports.total/100);page++) for(const report of (await call('/reports?pageSize=100&page='+page)).items) {assert(!seen.has(report.id));seen.add(report.id);full.push(report);}
- assert.equal(seen.size,entries.length,'All source reports can be paged without loss or duplication');
+ for(let page=2;page<=Math.ceil(reports.total/100);page++) for(const report of (await call('/reports?pageSize=100&page='+page)).items) {assert(!seen.has(report.metadataId));seen.add(report.metadataId);full.push(report);}
+ assert.equal(seen.size,dictionaryCount,'All dictionary records can be paged without loss or duplication');
  const dictionary=(await client.query("SELECT * FROM dim_bi_report_dictionary WHERE coalesce(suggested_owner_name,'')<>'' AND coalesce(report_name,'')<>'' LIMIT 1")).rows[0];
  assert(dictionary);
  const metadata=full.find(r=>r.id===dictionary.report_id);
@@ -55,10 +56,10 @@ try{
  const {rows:dictionaryNames}=await client.query('SELECT report_id,report_name FROM dim_bi_report_dictionary');
  const names=new Map(dictionaryNames.map(row=>[row.report_id,row.report_name]));
  for(const report of full){
-   assert.equal(report.name,names.get(report.id)?.trim() || entries.find(entry=>entry.id===report.id).name);
+   assert.equal(report.name,names.get(report.id)?.trim() || entries.find(entry=>entry.id===report.id)?.name || '未命名报表');
    if(!names.has(report.id)){assert.equal(report.owner,'');assert.deepEqual(report.metrics,[]);}
  }
- const target=reports.items[0];
+ const target=full.find(r=>r.permission==='granted');
  const found=await call('/search?category=all&q='+encodeURIComponent(target.name));assert(found.items.some(item=>item.report?.id===target.id));
  for(const category of ['report','tag','metric'])await call('/search?category='+category+'&q=');
  const beforeSnapshot=reportQueries;
@@ -67,9 +68,9 @@ try{
  const notices=await call('/notices?pageSize=100');assert.equal(notices.total,5);assert(notices.items.every(n=>n.attachment?.url.startsWith('https://')));
  const authorized=context;
  context={...authorized,entries:entries.map((e,i)=>i===0?{...e,type:'folder'}:e)};
- assert.equal((await call('/reports')).total,entries.length-1,'Platform folders are not dictionary reports');
+ assert.equal((await call('/reports')).total,dictionaryCount-full.filter(r=>r.id===entries[0].id).length,'Platform folders are not dictionary reports');
  context={...authorized,ids:new Set(),entries:[]};
- assert.equal((await call('/reports')).total,0);assert.equal((await call('/search?category=all&q=')).total,0);
+ const denied=await call('/reports');assert.equal(denied.total,dictionaryCount);assert(denied.items.every(r=>r.permission==='denied'));assert.equal((await call('/search?category=all&q=')).total,0);
  assert.deepEqual(await call('/workbench/snapshot'),{recent:[],frequent:[],favorites:[]});
  assert.equal((await call('/notices')).total,5,'Notice permissions depend on OA department, not report tree');
  context={user:{userName:'__portal_no_such_user__',name:'未匹配用户'},ids:authorized.ids,entries};

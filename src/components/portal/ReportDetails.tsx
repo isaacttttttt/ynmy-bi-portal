@@ -28,7 +28,7 @@ export function EntryIcon({ entry }: { entry: Entry }) {
     {entry.iconUrl && loaded === key ? <img src={entry.iconUrl} alt="" onError={() => setLoaded('')} />
       : entry.type === 'folder' ? <FolderOpen size={38} />
       : entry.type === 'url' ? <ExternalLink size={30} />
-      : <img src={`/assets/${fallback}.png`} alt="" />}
+      : <img src={`/portal/assets/${fallback}.png`} alt="" />}
   </span>;
 }
 export function ReportDetails({ report, onClose }: { report: Report | null; onClose: () => void }) {
@@ -37,7 +37,7 @@ export function ReportDetails({ report, onClose }: { report: Report | null; onCl
   useEffect(() => { if (report) setPrevious(report); }, [report]);
   const shown = report || previous; // Keep content visible throughout the closing animation.
   const text = (value: string | null) => value || '暂未维护';
-  return <Drawer open={!!report} onClose={onClose} placement="right" width="min(680px, 100vw)" rootClassName="report-drawer" title={shown && <><h2>{shown.name}</h2><p>{[shown.department, shown.owner, shown.frequency].filter(Boolean).join(' · ')}</p></>} footer={shown && <div className="detail-footer"><FavoriteButton entry={shown} /><button className="secondary-button" onClick={onClose}>关闭</button><button className="primary-button" disabled={shown.status === 'archived'} onClick={() => { onClose(); open(shown); }}>{shown.status === 'archived' ? '已归档，暂停打开' : '打开报表'}</button></div>}>
+  return <Drawer open={!!report} onClose={onClose} placement="right" width="min(680px, 100vw)" rootClassName="report-drawer" title={shown && <><h2>{shown.name}</h2><p>{[shown.department, shown.owner, shown.frequency].filter(Boolean).join(' · ')}</p></>} footer={shown && <div className="detail-footer"><FavoriteButton entry={shown} /><button className="secondary-button" onClick={onClose}>关闭</button><button className="primary-button" disabled={shown.permission === 'denied' || shown.status === 'archived'} onClick={() => { onClose(); open(shown); }}>{shown.permission === 'denied' ? '无访问权限' : shown.status === 'archived' ? '已归档，暂停打开' : '打开报表'}</button></div>}>
     {shown && <ScrollArea label="报表详情"><section><h3>报表说明</h3><p>{text(shown.useScene)}</p></section>
       <section><h3>报表简介</h3><p>{text(shown.description)}</p></section>
       <section><h3>核心指标</h3>{shown.metrics.length ? <div className="metric-tags">{shown.metrics.map(m => <span key={m}>{m}</span>)}</div> : <p>暂未维护</p>}</section>

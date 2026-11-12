@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-首页：`http://localhost:3000/`；报表字典：`http://localhost:3000/report-dictionary/`。
+首页：`http://localhost:3000/portal/`；报表字典：`http://localhost:3000/portal/report-dictionary/`。
 
 默认使用明确标注的演示数据。收藏保存在当前浏览器的演示命名空间；报表打开显示接入提示。未配置地址的快捷入口不可点击。
 
@@ -29,10 +29,23 @@ npm run build
 
 ## 后端接入
 
-复制 `.env.example` 为 `.env.local`，后端就绪后设置 `NEXT_PUBLIC_PORTAL_MODE=api` 并重新构建。门户通过 `/api/portal/v1` 获取数据。所有目录权限、公告可见范围、统计数量及分页须在后端处理。
+复制 `.env.example` 为 `.env.local`，后端就绪后设置 `NEXT_PUBLIC_PORTAL_MODE=api` 并重新构建。门户通过 `/portal/api/portal/v1` 获取数据。所有目录权限、公告可见范围、统计数量及分页须在后端处理。
 
 - [接口契约与底表交接问题](docs/API.md)
 - [后端服务、Railway 部署与测试](docs/BACKEND_HANDOFF.md)
+
+## 单路径部署与验证
+
+页面、图片、脚本和业务 API 统一使用 `/portal/` 前缀。两层网关均原样转发该前缀，不重写路径。见 [部署说明](deploy/README.md) 和 [Nginx 配置](deploy/nginx-portal.conf)。旧 r2 镜像不适用，需要重新构建。
+
+```bash
+NEXT_PUBLIC_PORTAL_MODE=api npm run build
+npm test
+npm --prefix backend run test:routes
+npm run test:prefix
+```
+
+`test:prefix` 使用已有 Playwright 环境；未安装在项目中时，通过 `PLAYWRIGHT_MODULE` 指向可用模块，`BROWSER_CHANNEL` 默认 `msedge`。测试启动实际后端静态服务，通过现有演示数据模拟业务接口，验证搜索导航、字典刷新和所有本地请求的前缀，不连接客户数据库。真实数据库及 BI 联调使用现有后端集成测试，需另外配置测试环境。
 - [前端交接、设计规则与验收方法](docs/FRONTEND_HANDOFF.md)
 - `src/lib/portal-model.ts`：前后端共享的数据结构说明
 - `src/lib/portal-api.ts`：HTTP入口、演示切换、帆软预览适配

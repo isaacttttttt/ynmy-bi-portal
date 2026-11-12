@@ -37,7 +37,7 @@ try {
   Object.assign(process.env, env, { PUBLIC_ORIGIN: 'https://customer.example', FINE_ROOT_ID: 'report-1', PORTAL_DATA_MODEL: 'source' });
   delete process.env.FINE_SESSION_PATH; delete process.env.POC_PLATFORM_URL;
   app = await buildApp({ db: { query: (...args) => db.query(...args), end: async () => {} } });
-  const response = await app.inject({ url: '/api/portal/v1/bootstrap', headers: request(users[0].id).headers });
+  const response = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: request(users[0].id).headers });
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().data.user.name, users[0].realname || users[0].username);
   assert(requests.every(path => path === '/v10/view/entry/tree' || path === '/v10/favorite/entry/list'));

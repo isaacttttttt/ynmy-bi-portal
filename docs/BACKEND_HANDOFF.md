@@ -1,12 +1,14 @@
 # 后端与 Railway 测试交接
 
+当前代码已改为 `/portal/` 前缀；下文保留原测试环境交接信息，不代表线上已更新。部署新版本需同步门户镜像与测试平台的 iframe 地址。
+
 本轮部署使用示例数据，不启动本地 PoC。正式接入时保留门户 API，替换底表数据与帆软会话适配。
 
 ## 服务边界
 
 | 服务 | 入口 | 职责 |
 | --- | --- | --- |
-| portal | https://portal-production-c6e5.up.railway.app/poc/ | Fastify 5 提供静态前端、`/api/portal/v1` 和测试平台代理 |
+| portal | https://portal-production-c6e5.up.railway.app/poc/ | Fastify 5 提供静态前端、`/portal/api/portal/v1` 和测试平台代理 |
 | platform-simulator | Railway 内网，3002 | 模拟会话、授权目录、收藏和预览；数据写入 PostgreSQL |
 | PostgreSQL | Railway 内网，5432 | 持久化业务示例底表和模拟平台状态，挂载数据卷 |
 

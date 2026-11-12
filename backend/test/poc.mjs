@@ -21,7 +21,7 @@ async function login(user) {
   assert.ok(cookie && cookie.includes('HttpOnly') && cookie.includes('Secure') && cookie.includes('SameSite=Lax'));
   return cookie.split(';')[0];
 }
-const api = '/api/portal/v1';
+const api = '/portal/api/portal/v1';
 const restartFile = new URL('../../artifacts/qa/restart-check.json', import.meta.url);
 if (process.argv.includes('--prepare-restart')) {
   const cookie = await login('admin');

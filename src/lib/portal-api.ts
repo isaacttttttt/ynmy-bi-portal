@@ -1,8 +1,9 @@
 import type { Bootstrap, Notice, Page, Report, ReportPage, Filters, WorkbenchTab, WorkbenchData, Entry, SearchCategory } from './portal-model';
 import { safeUrl } from './portal-model';
+import portalConfig from '../config/portal.json';
 
 export const demoMode = (process.env.NEXT_PUBLIC_PORTAL_MODE || 'demo') === 'demo';
-const apiBase = process.env.NEXT_PUBLIC_PORTAL_API_BASE || '/api/portal/v1';
+const apiBase = process.env.NEXT_PUBLIC_PORTAL_API_BASE || `${portalConfig.basePath}/api/portal/v1`;
 export const platformBase = process.env.NEXT_PUBLIC_FINE_BASE || '/webroot/decision';
 export interface Endpoints {
   bootstrap: Bootstrap; reports: ReportPage; workbench: Page<Report>; notices: Page<Notice>;
@@ -28,7 +29,8 @@ export async function request<T>(path: string, signal?: AbortSignal, body?: unkn
   });
   const result = await response.json().catch(() => null);
   if (!response.ok || !result?.success) {
-    if (response.status === 401) throw new PortalRequestError('登录已过期，请返回帆软平台重新登录', 401);
+    if (response.status === 401) throw new PortalRequestError(result?.error?.code === 'INVALID_IDENTITY'
+      ? result.error.message : '登录已过期，请返回帆软平台重新登录', 401);
     if (response.status === 403) throw new PortalRequestError('当前账号没有访问权限，请联系管理员', 403);
     throw new PortalRequestError(result?.error?.message || '服务暂时不可用，请重试', response.status);
   }

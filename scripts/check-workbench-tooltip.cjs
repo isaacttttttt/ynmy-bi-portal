@@ -11,7 +11,7 @@ const fs = require('node:fs/promises');
   const page = await context.newPage(); page.setDefaultTimeout(30000);
   const errors = [], reads = [];
   page.on('pageerror', error => errors.push(error.message));
-  page.on('request', request => { if (request.url().includes('/api/portal/v1/workbench?')) reads.push(request.url()); });
+  page.on('request', request => { if (request.url().includes('/portal/api/portal/v1/workbench?')) reads.push(request.url()); });
   try {
     await page.goto(base + '/poc/');
     await page.locator('#key').fill(accessKey); await page.locator('#login').click();
@@ -19,7 +19,7 @@ const fs = require('node:fs/promises');
     await frame.locator('.workbench-card').first().waitFor();
     const data = {};
     for (const tab of ['recent','frequent','favorites']) {
-      const response = await context.request.get(`${base}/api/portal/v1/workbench?tab=${tab}&pageSize=100`);
+      const response = await context.request.get(`${base}/portal/api/portal/v1/workbench?tab=${tab}&pageSize=100`);
       assert.equal(response.status(), 200); data[tab] = (await response.json()).data.items;
     }
     const loaded = reads.length;

@@ -22,22 +22,22 @@ if (mockHttp) {
   const reads = [];
   let accessKey, initialFavorite;
   const liveWrite = async (url, data) => {
-    const response = await context.request.fetch(base + url, {method:url.startsWith('/api/')?'PUT':'POST',headers:{Origin:base},data});
+    const response = await context.request.fetch(base + url, {method:url.startsWith('/portal/api/')?'PUT':'POST',headers:{Origin:base},data});
     assert.equal(response.status(),200,url); return response;
   };
   if (livePoc) {
     assert(!mockHttp,'Live verification must not intercept HTTP');
     accessKey = process.env.POC_ACCESS_KEY || JSON.parse(await fs.readFile('artifacts/qa/railway-secrets.json','utf8')).accessKey;
     await liveWrite('/poc/login',{user:'admin',accessKey});
-    const bootstrap=await (await context.request.get(base+'/api/portal/v1/bootstrap')).json();
+    const bootstrap=await (await context.request.get(base+'/portal/api/portal/v1/bootstrap')).json();
     initialFavorite=bootstrap.data.favoriteIds.includes('entry-1');
-    await liveWrite('/api/portal/v1/favorites/entry-1',{favorite:false});
-    page.on('request',request=>{const u=new URL(request.url());if(request.method()==='GET'&&u.pathname.startsWith('/api/portal/v1/'))reads.push(u.pathname.replace('/api/portal/v1','')+u.search);});
+    await liveWrite('/portal/api/portal/v1/favorites/entry-1',{favorite:false});
+    page.on('request',request=>{const u=new URL(request.url());if(request.method()==='GET'&&u.pathname.startsWith('/portal/api/portal/v1/'))reads.push(u.pathname.replace('/portal/api/portal/v1','')+u.search);});
   }
   let refreshMode = 'initial';
-  if (mockHttp) await page.context().route('**/api/portal/v1/**', async route => {
+  if (mockHttp) await page.context().route('**/portal/api/portal/v1/**', async route => {
     const request = route.request(), url = new URL(request.url());
-    const endpoint = url.pathname.replace('/api/portal/v1', '');
+    const endpoint = url.pathname.replace('/portal/api/portal/v1', '');
     if (request.method() === 'GET') reads.push(endpoint + url.search);
     if ((refreshMode === 'failure' && endpoint === '/workbench') || refreshMode === 'expired') {
       await route.fulfill({ status:refreshMode === 'expired' ? 401 : 503, json:{success:false} }); return;
@@ -51,7 +51,7 @@ if (mockHttp) {
     for (const width of [1280,1440,1920,2560]) {
       await page.setViewportSize({width,height:Math.round(width * 9 / 16)});
       for (const [route, target, name] of [['/','.workbench-card','home'],['/report-dictionary/','.dictionary-card','dictionary']]) {
-        await page.goto(base + route); await page.locator(target).first().waitFor();
+        await page.goto(base + '/portal' + route); await page.locator(target).first().waitFor();
         await page.evaluate(() => document.fonts.ready);
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name} overflow at ${width}`);
         const broken = await page.locator('img').evaluateAll(imgs => imgs.filter(i => i.complete && !i.naturalWidth).map(i=>i.src));
@@ -78,7 +78,7 @@ if (mockHttp) {
       }
     }
     await page.setViewportSize({width:1440,height:900});
-    await page.goto(base); await page.locator('.workbench-card').first().waitFor();
+    await page.goto(base+'/portal/'); await page.locator('.workbench-card').first().waitFor();
     await page.getByRole('button',{name:'我常用的',exact:true}).click();
     await page.getByText('近30天访问',{exact:true}).first().waitFor();
     const scroll = page.getByRole('region',{name:'工作台报表列表'});
@@ -149,7 +149,7 @@ if (mockHttp) {
     for (const [width,height] of [[1280,720],[1440,900],[1920,900],[2560,1440]]) {
       await page.setViewportSize({width,height});
       for (const route of ['/','/report-dictionary/']) {
-        await page.goto(base+route);
+        await page.goto(base+'/portal'+route);
         await page.locator(route==='/' ? '.workbench-card' : '.dictionary-card').first().waitFor();
         for (const [mode,label] of [['width','宽度自适应'],['fit','双向自适应']]) {
           await page.getByRole('button',{name:label,exact:true}).click();
@@ -196,7 +196,7 @@ if (mockHttp) {
       Storage.prototype.getItem = Storage.prototype.setItem = () => { throw new DOMException('Storage blocked','SecurityError'); };
     });
     if(livePoc) await host.goto(base+'/poc/');
-    await host.setContent(`<iframe name="embedded-portal" src="${base}/" style="width:1280px;height:640px;border:0"></iframe>`);
+    await host.setContent(`<iframe name="embedded-portal" src="${base}/portal/" style="width:1280px;height:640px;border:0"></iframe>`);
     const embedded=host.frame({name:'embedded-portal'});
     await embedded.locator('.workbench-card').first().waitFor();
     await embedded.getByRole('button',{name:'双向自适应',exact:true}).click();
@@ -211,12 +211,12 @@ if (mockHttp) {
     await host.close();
     if (livePoc) {
       await page.clock.install();
-      await page.goto(base); await page.locator('.workbench-card').first().waitFor();
+      await page.goto(base+'/portal/'); await page.locator('.workbench-card').first().waitFor();
       const countReads=()=>reads.filter(p=>p.startsWith('/workbench?')).length;
       const before=countReads();
       for(const name of ['我收藏的','最近打开','我常用的'])await page.getByRole('button',{name,exact:true}).click();
       assert.equal(countReads(),before,'Live tab switching uses cache');
-      await liveWrite('/api/portal/v1/favorites/entry-1',{favorite:true});
+      await liveWrite('/portal/api/portal/v1/favorites/entry-1',{favorite:true});
       await page.clock.fastForward(600100);
       await page.getByRole('button',{name:'取消收藏集团经营分析总览驾驶舱',exact:true}).waitFor();
       assert.equal(countReads(),before+3,'Live refresh fetches all tabs');
@@ -225,7 +225,7 @@ if (mockHttp) {
       await page.clock.fastForward(600100); await failed;
       assert(await page.locator('.workbench-card').count()>0,'Live upstream failure preserves last view');
       await liveWrite('/poc/control',{accessKey,action:'fault',user:'admin',fault:'none'});
-      await liveWrite('/api/portal/v1/favorites/entry-1',{favorite:false});
+      await liveWrite('/portal/api/portal/v1/favorites/entry-1',{favorite:false});
       await liveWrite('/poc/logout',{});
       await page.clock.fastForward(600100);
       await page.getByText('登录已过期，请返回帆软平台重新登录',{exact:true}).waitFor();
@@ -248,7 +248,7 @@ if (mockHttp) {
     if (mockHttp) {
       await page.setViewportSize({width:1920,height:1080});
       await page.clock.install();
-      await page.goto(base); await page.locator('.workbench-card').first().waitFor();
+      await page.goto(base+'/portal/'); await page.locator('.workbench-card').first().waitFor();
       const countReads = () => reads.filter(p => p.startsWith('/workbench?')).length;
       const initialReads = countReads();
       for (const name of ['我收藏的','最近打开','我常用的']) {
@@ -280,7 +280,7 @@ if (mockHttp) {
     if(livePoc && initialFavorite!==undefined){
       await liveWrite('/poc/login',{user:'admin',accessKey});
       await liveWrite('/poc/control',{accessKey,action:'fault',user:'admin',fault:'none'});
-      await liveWrite('/api/portal/v1/favorites/entry-1',{favorite:initialFavorite});
+      await liveWrite('/portal/api/portal/v1/favorites/entry-1',{favorite:initialFavorite});
       await liveWrite('/poc/logout',{});
     }
     await browser.close();

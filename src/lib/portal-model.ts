@@ -6,7 +6,7 @@ export interface Entry {
 export interface Report extends Entry {
   metadataId: string; description: string; module: string; department: string;
   owner: string; developer: string; developerDepartment: string; frequency: string; status: 'active' | 'archived';
-  permission: 'granted'; onlineOn: string | null; updateNote: string;
+  permission: 'granted' | 'denied'; onlineOn: string | null; updateNote: string;
   source: string; metrics: string[]; views: number; visits30d: number;
   lastVisitedOn: string | null; useScene: string; calcLogic: string; updatedOn: string;
 }
@@ -14,7 +14,7 @@ export interface Notice {
   id: string; title: string; category: string; pinned: boolean; publishedOn: string;
   content: string; url?: string; attachment?: { name: string; url: string };
 }
-export interface QuickEntry { id: string; name: string; description: string; url: string | null }
+export interface QuickEntry { id: string; name: string; description: string; url: string | null; iconUrl?: string | null }
 export interface Bootstrap {
   platform?: { entryAccessUrl: string; biServiceName: string; biTabType: string };
   user: { name: string }; rootId: string; entries: Entry[]; favoriteIds: string[];
@@ -38,7 +38,7 @@ export const volume = (views: number) => views > 1000 ? 'high' : views >= 100 ? 
 export const typeLabel: Record<EntryType, string> = { folder: '专题目录', bi: 'BI 分析', fvs: '驾驶舱', frm: '填报', cpt: '报表', url: '外部链接' };
 export const themeFor = (type: EntryType) => type === 'folder' ? 'orange' : type === 'frm' ? 'purple' : type === 'cpt' ? 'teal' : 'blue';
 export const filterLabels: Record<FilterKey, string> = { organization: '所属组织', status: '报表状态', permission: '权限状态', frequency: '数据时效', volume: '访问量级' };
-export const optionLabels: Record<string, string> = { granted: '有访问权限', active: '在用', archived: '已归档', high: '高频（>1000）', medium: '中频（100–1000）', low: '低频（<100）' };
+export const optionLabels: Record<string, string> = { granted: '有访问权限', denied: '无访问权限', active: '在用', archived: '已归档', high: '高频（>1000）', medium: '中频（100–1000）', low: '低频（<100）' };
 export function paginate<T>(items: T[], page: number, pageSize: number): Page<T> {
   return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize };
 }

@@ -15,6 +15,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 WORKDIR /app
 COPY backend/src ./backend/src
 COPY src/lib/portal-model.ts ./src/lib/portal-model.ts
+COPY src/config/portal.json ./src/config/portal.json
 COPY --from=frontend /app/out ./out
 ENV NODE_ENV=production PORT=3001 HOST=::
 USER node

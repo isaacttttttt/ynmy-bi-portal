@@ -102,10 +102,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 export function FavoriteButton({ entry }: { entry: Entry }) {
   const { favorites, pending, toggleFavorite } = usePortal();
   const active = favorites.includes(entry.id);
-  return <button className={`icon-button favorite ${active ? 'is-favorite' : ''}`} aria-label={`${active ? '取消收藏' : '收藏'}${entry.name}`} aria-pressed={active} disabled={pending.includes(entry.id)} onClick={() => toggleFavorite(entry)}><Star size={17} fill={active ? 'currentColor' : 'none'} /></button>;
+  return <button className={`icon-button favorite ${active ? 'is-favorite' : ''}`} aria-label={`${active ? '取消收藏' : '收藏'}${entry.name}`} aria-pressed={active} disabled={pending.includes(entry.id) || ('permission' in entry && entry.permission === 'denied')} onClick={() => toggleFavorite(entry)}><Star size={17} fill={active ? 'currentColor' : 'none'} /></button>;
 }
 export function SectionTitle({ children }: { children: ReactNode }) {
-  return <h2 className="section-title"><img src="/assets/图标装饰@2x.png" alt="" />{children}</h2>;
+  return <h2 className="section-title"><img src="/portal/assets/图标装饰@2x.png" alt="" />{children}</h2>;
 }
 export function RequestState({ loading, error, retry }: { loading?: boolean; error?: string; retry?: () => void }) {
   return <div className="request-state" role={error ? 'alert' : 'status'}>{loading ? <><RefreshCw className="loading-spin" size={22} /><p>正在加载…</p></> : error ? <><p>{error}</p><button className="secondary-button" onClick={retry}>重新加载</button></> : <><SearchX size={30} /><p>暂无符合条件的内容</p><span>请调整搜索或筛选条件</span></>}</div>;

@@ -15,7 +15,7 @@ const fs=require('node:fs/promises');
   const page=await context.newPage(), errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(30000);
   try {
     if(live){const {accessKey}=JSON.parse(await fs.readFile('artifacts/qa/railway-secrets.json','utf8'));const response=await context.request.post(base+'/poc/login',{headers:{Origin:base},data:{user:'admin',accessKey}});assert.equal(response.status(),200);}
-    await page.goto(base+'/');await page.setContent(`<iframe name="portal" src="${base}/" style="width:100%;height:100vh;border:0;display:block"></iframe><style>body{margin:0}</style>`);
+    await page.goto(base+'/portal/');await page.setContent(`<iframe name="portal" src="${base}/portal/" style="width:100%;height:100vh;border:0;display:block"></iframe><style>body{margin:0}</style>`);
     const frame=page.frame({name:'portal'});await frame.locator('.notice-row').first().waitFor();
     const settle=()=>frame.evaluate(()=>Promise.all(window.modeTransitions.map(t=>t.finished)));
     const read=()=>frame.evaluate(()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}};return {main:rect('.home-layout'),background:rect('.portal-viewport'),notices:document.querySelector('.notices .notice-list').innerText,scale:getComputedStyle(document.querySelector('.portal-canvas')).transform};});

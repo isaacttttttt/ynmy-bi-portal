@@ -8,7 +8,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "云南白药集团 · 数据门户",
   description: "数据驱动经营 · 智慧赋能决策",
-  icons: { icon: '/assets/icon_blue.png' },
+  icons: { icon: '/portal/assets/icon_blue.png' },
 };
 
 export default function RootLayout({

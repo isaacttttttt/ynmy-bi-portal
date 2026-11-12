@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "test": "node scripts/check-portal.cjs"
+    "test": "node scripts/check-portal.cjs",
+    "test:prefix": "node scripts/check-portal-prefix.cjs"
   },
   "dependencies": {
     "antd": "^5.24.2",

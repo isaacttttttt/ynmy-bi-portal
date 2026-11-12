@@ -20,7 +20,7 @@ const fs = require('node:fs/promises'), path = require('node:path'), assert = re
       const contentType = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.txt': 'text/plain' }[path.extname(file)];
       await route.fulfill({ body: await fs.readFile(file), contentType });
     });
-    await context.route('**/api/portal/v1/workbench/snapshot', async route => {
+    await context.route('**/portal/api/portal/v1/workbench/snapshot', async route => {
       const response = await route.fetch(), body = await response.json();
       assert(body.data.recent.length > 8);
       body.data.recent[0].iconUrl = 'https://icon-test.invalid/slow.png';

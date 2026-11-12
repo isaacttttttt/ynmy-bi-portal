@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const ts = require('typescript');
-require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, filename);
+require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText, filename);
 const { emptyFilters, queryReports, volume, descendants, breadcrumb, safeUrl, searchCatalog } = require('../src/lib/portal-model.ts');
 const { reports, bootstrap } = require('../src/lib/portal-fixtures.ts');
 const { mockRequest } = require('../src/lib/portal-mock.ts');
@@ -70,6 +70,8 @@ assert.throws(() => openPlatformEntry(reports[1]), /跨域/);
 (async () => {
   global.fetch = async (_, init) => { assert.equal(init.credentials,'include'); return {ok:false,status:401,json:async()=>({})}; };
   await assert.rejects(request('/bootstrap'), /登录已过期/);
+  global.fetch = async () => ({ok:false,status:401,json:async()=>({error:{code:'INVALID_IDENTITY',message:'无法匹配当前登录账号'}})});
+  await assert.rejects(request('/bootstrap'), /无法匹配当前登录账号/);
   global.fetch = async () => ({ok:false,status:503,json:async()=>{throw new Error('html');}});
   await assert.rejects(request('/reports'), /服务暂时不可用/);
   global.fetch = async () => ({ok:true,status:200,json:async()=>({success:true,data:{items:[]}})});
@@ -77,7 +79,7 @@ assert.throws(() => openPlatformEntry(reports[1]), /跨域/);
   let workbenchRequests=0;
   const snapshot={recent:[{id:'recent-1'}],frequent:[{id:'frequent-1'}],favorites:[{id:'favorite-1'}]};
   global.fetch = async path => {
-    workbenchRequests++;assert.equal(path,'/api/portal/v1/workbench/snapshot');
+    workbenchRequests++;assert.equal(path,'/portal/api/portal/v1/workbench/snapshot');
     return {ok:true,status:200,json:async()=>({success:true,data:snapshot})};
   };
   const workbench = await loadWorkbench('/workbench');

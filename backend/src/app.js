@@ -1,7 +1,10 @@
 import Fastify from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { finished } from 'node:stream/promises';
+import { logStream, logParameters } from './request-log.js';
 import staticFiles from '@fastify/static';
 import { fileURLToPath } from 'node:url';
+import portalConfig from '../../src/config/portal.json' with { type: 'json' };
 import { createPool } from './config/database.js';
 import { platformClient } from './platform.js';
 import { ApiError, invalid, pageQuery, requireOrigin, searchQuery } from './http.js';
@@ -9,6 +12,8 @@ import * as demoRepository from './repository.js';
 import * as sourceRepository from './source-repository.js';
 import { searchHistory, saveSearch } from './repository.js';
 import { queryReports, paginate, descendants, searchCatalog, searchCategories } from '../../src/lib/portal-model.ts';
+
+const { basePath } = portalConfig;
 
 export async function buildApp({ platform, db = createPool() } = {}) {
   platform ||= platformClient(process.env, db);
@@ -18,22 +23,34 @@ export async function buildApp({ platform, db = createPool() } = {}) {
   const model = process.env.PORTAL_DATA_MODEL || 'demo';
   if (!['demo','source'].includes(model)) throw new Error('Invalid PORTAL_DATA_MODEL');
   const { dataAsOf, reportsFor, noticesFor, quickEntries } = model === 'source' ? sourceRepository : demoRepository;
-  const app = Fastify({ logger: { level: 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers.set-cookie'] },
+  const stream = logStream(process.env.PORTAL_LOG_FILE);
+  const app = Fastify({ logger: { level: 'info', stream, redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers.set-cookie'] },
     disableRequestLogging: true, genReqId: () => randomUUID(), requestIdHeader: false,
     bodyLimit: 16384, requestTimeout: 15000, ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
   app.addHook('onClose', () => db.end());
+  app.addHook('onClose', async () => { platform.close?.(); });
+  if (stream) app.addHook('onClose', async () => { stream.end(); await finished(stream); });
+  app.addHook('onRequest', async request => {
+    request.log.info({ requestId: request.id, stage: 'received', method: request.method,
+      path: request.url.split('?')[0], query: logParameters(request.query),
+      cookieNames: (request.headers.cookie || '').split(';').map(item => item.trim().split('=')[0]).filter(Boolean) }, 'request received');
+  });
+  app.addHook('preValidation', async request => {
+    if (request.body !== undefined || Object.keys(request.params || {}).length) request.log.info({ requestId: request.id,
+      stage: 'parameters', params: logParameters(request.params), body: logParameters(request.body) }, 'request parameters');
+  });
   app.addHook('onSend', async (request, reply) => {
     const path = request.url.split('?')[0];
-    const cache = reply.statusCode === 200 && request.routeOptions.url === '/*'
-      ? path.startsWith('/_next/static/') ? 'public, max-age=31536000, immutable'
-        : path.startsWith('/assets/') ? 'public, max-age=3600' : 'private, no-store'
+    const cache = reply.statusCode === 200 && request.routeOptions.url === `${basePath}/*`
+      ? path.startsWith(`${basePath}/_next/static/`) ? 'public, max-age=31536000, immutable'
+        : path.startsWith(`${basePath}/assets/`) ? 'public, max-age=3600' : 'private, no-store'
       : 'private, no-store';
     reply.header('Cache-Control', cache); reply.header('X-Content-Type-Options', 'nosniff'); reply.header('X-Request-Id', request.id);
   });
-  app.addHook('onResponse', async (request, reply) => { app.log.info({ requestId: request.id, route: request.routeOptions.url, method: request.method, status: reply.statusCode }, 'request'); });
+  app.addHook('onResponse', async (request, reply) => { app.log.info({ requestId: request.id, route: request.routeOptions.url, method: request.method, status: reply.statusCode, durationMs: reply.elapsedTime }, 'request'); });
   app.setErrorHandler((error, request, reply) => {
     const status = error instanceof ApiError ? error.statusCode : error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : /^[0-9A-Z]{5}$/.test(error.code || '') || ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code) || error.message === 'Query read timeout' ? 503 : 500;
-    app.log.error({ requestId: request.id, code: error.code, status }, 'request failed');
+    app.log.error({ requestId: request.id, code: error.code, status, reason: error instanceof ApiError ? error.message : undefined }, 'request failed');
     reply.code(status).send({ success: false, error: { code: error instanceof ApiError ? error.code : status === 400 ? 'INVALID_REQUEST' : status === 503 ? 'DATA_UNAVAILABLE' : 'SERVICE_ERROR', message: error instanceof ApiError ? error.message : status === 400 ? '请求参数不合法' : '服务暂时不可用，请重试' }, requestId: request.id });
   });
   app.setNotFoundHandler((request, reply) => reply.code(404).send({ success: false, error: { code: 'NOT_FOUND', message: '接口不存在' }, requestId: request.id }));
@@ -53,7 +70,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
     });
     api.get('/reports', async request => {
       const query = pageQuery(request.query, { reports: true });
-      return { success: true, data: queryReports(await reportsFor(db, request.portal), query) };
+      return { success: true, data: queryReports(await reportsFor(db, request.portal, true), query) };
     });
     api.get('/workbench', async request => {
       const query = pageQuery(request.query, { workbench: true, defaultSize: 8 });
@@ -100,7 +117,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       if (favorites.includes(id) !== request.body.favorite) await platform.favorite(context, id, request.body.favorite);
       return { success: true, data: { id, favorite: request.body.favorite, report } };
     });
-  }, { prefix: '/api/portal/v1' });
+  }, { prefix: `${basePath}/api/portal/v1` });
   // Only the cloud test environment enables this gateway to the private platform simulator.
   if (process.env.POC_PLATFORM_URL) {
     const simulator = new URL(process.env.POC_PLATFORM_URL);
@@ -122,7 +139,8 @@ export async function buildApp({ platform, db = createPool() } = {}) {
     } });
     app.get('/poc', (request, reply) => reply.redirect('/poc/'));
   }
-  await app.register(staticFiles, { root: fileURLToPath(new URL('../../out/', import.meta.url)), index: ['index.html'] });
+  app.get(basePath, (request, reply) => reply.redirect(`${basePath}/${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, 308));
+  await app.register(staticFiles, { root: fileURLToPath(new URL('../../out/', import.meta.url)), prefix: `${basePath}/`, index: ['index.html'] });
   try { await db.query('SELECT 1'); } catch (error) { await app.close(); throw error; }
   return app;
 }

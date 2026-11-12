@@ -13,7 +13,7 @@ type TabType = "recent" | "favorite" | "collected";
 const WORKBENCH_DATA = [
   {
     id: 1,
-    icon: "/assets/驾驶舱.png",
+    icon: "/portal/assets/驾驶舱.png",
     category: "驾驶舱",
     theme: "blue" as const,
     title: "临床纯销驾驶舱",
@@ -23,7 +23,7 @@ const WORKBENCH_DATA = [
   },
   {
     id: 2,
-    icon: "/assets/报表.png",
+    icon: "/portal/assets/报表.png",
     category: "报表",
     theme: "teal" as const,
     title: "实时流向可视化",
@@ -33,7 +33,7 @@ const WORKBENCH_DATA = [
   },
   {
     id: 3,
-    icon: "/assets/填报.png",
+    icon: "/portal/assets/填报.png",
     category: "填报",
     theme: "purple" as const,
     title: "DMS库存填报",
@@ -43,7 +43,7 @@ const WORKBENCH_DATA = [
   },
   {
     id: 4,
-    icon: "/assets/驾驶舱.png",
+    icon: "/portal/assets/驾驶舱.png",
     category: "驾驶舱",
     theme: "blue" as const,
     title: "经营分析驾驶舱",
@@ -53,7 +53,7 @@ const WORKBENCH_DATA = [
   },
   {
     id: 5,
-    icon: "/assets/报表.png",
+    icon: "/portal/assets/报表.png",
     category: "报表",
     theme: "teal" as const,
     title: "销售业绩报表",
@@ -63,7 +63,7 @@ const WORKBENCH_DATA = [
   },
   {
     id: 6,
-    icon: "/assets/填报.png",
+    icon: "/portal/assets/填报.png",
     category: "填报",
     theme: "purple" as const,
     title: "费用填报",
@@ -73,7 +73,7 @@ const WORKBENCH_DATA = [
   },
   {
     id: 7,
-    icon: "/assets/驾驶舱.png",
+    icon: "/portal/assets/驾驶舱.png",
     category: "驾驶舱",
     theme: "blue" as const,
     title: "供应链驾驶舱",
@@ -83,7 +83,7 @@ const WORKBENCH_DATA = [
   },
   {
     id: 8,
-    icon: "/assets/报表.png",
+    icon: "/portal/assets/报表.png",
     category: "报表",
     theme: "teal" as const,
     title: "库存周转分析",
