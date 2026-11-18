@@ -1,4 +1,4 @@
-import type { Bootstrap, Entry, Notice, Report } from './portal-model';
+import type { Bootstrap, Entry, Notice, Report } from '../../src/lib/portal-model';
 
 const samples = [
   ['集团经营分析总览驾驶舱', 'fvs', '运营', '健康品事业群', '经营管理部', '集团核心指标总览与趋势分析', '经营收入,毛利率,预算达成率'],

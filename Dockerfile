@@ -5,7 +5,7 @@ RUN npm ci
 COPY next.config.js tsconfig.json tailwind.config.ts postcss.config.mjs ./
 COPY src ./src
 COPY public ./public
-ENV NEXT_TELEMETRY_DISABLED=1 NEXT_PUBLIC_PORTAL_MODE=api
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 FROM node:24.22.3-bookworm-slim

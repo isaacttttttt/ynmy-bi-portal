@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test": "node test/poc.mjs",
+    "test": "node test/config.mjs",
     "test:routes": "node test/config.mjs",
     "test:customer": "node test/customer.mjs",
     "test:tree-cache": "node test/tree-cache.mjs"

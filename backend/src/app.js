@@ -8,7 +8,6 @@ import portalConfig from '../../src/config/portal.json' with { type: 'json' };
 import { createPool } from './config/database.js';
 import { platformClient } from './platform.js';
 import { ApiError, invalid, pageQuery, requireOrigin, searchQuery } from './http.js';
-import * as demoRepository from './repository.js';
 import * as sourceRepository from './source-repository.js';
 import { searchHistory, saveSearch } from './repository.js';
 import { queryReports, paginate, descendants, searchCatalog, searchCategories } from '../../src/lib/portal-model.ts';
@@ -20,9 +19,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
   const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
   const rootId = process.env.FINE_ROOT_ID;
   if (!rootId) throw new Error('Missing FINE_ROOT_ID');
-  const model = process.env.PORTAL_DATA_MODEL || 'demo';
-  if (!['demo','source'].includes(model)) throw new Error('Invalid PORTAL_DATA_MODEL');
-  const { dataAsOf, reportsFor, noticesFor, quickEntries } = model === 'source' ? sourceRepository : demoRepository;
+  const { reportsFor, noticesFor, quickEntries, bootstrapDate } = sourceRepository;
   const stream = logStream(process.env.PORTAL_LOG_FILE);
   const app = Fastify({ logger: { level: 'info', stream, redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers.set-cookie'] },
     disableRequestLogging: true, genReqId: () => randomUUID(), requestIdHeader: false,
@@ -67,7 +64,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       if (Object.keys(request.query).length) throw invalid();
       const context = request.portal;
       const [favoriteIds, links, asOf] = await Promise.all([
-        platform.favorites(context), quickEntries(db), model === 'source' ? sourceRepository.bootstrapDate(db, request.log) : dataAsOf(db),
+        platform.favorites(context), quickEntries(db), bootstrapDate(db, request.log),
       ]);
       const tree = context.ids.has(rootId) ? context.entries.filter(e => e.id === rootId).concat(descendants(context.entries, rootId)) : [];
       return { success: true, data: { user: { name: context.user.name }, rootId, entries: tree, favoriteIds, quickEntries: links, dataAsOf: asOf, platform: platform.browser } };
@@ -122,27 +119,6 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       return { success: true, data: { id, favorite: request.body.favorite, report } };
     });
   }, { prefix: `${basePath}/api/portal/v1` });
-  // Only the cloud test environment enables this gateway to the private platform simulator.
-  if (process.env.POC_PLATFORM_URL) {
-    const simulator = new URL(process.env.POC_PLATFORM_URL);
-    app.route({ method: ['GET', 'POST'], url: '/poc/*', handler: async (request, reply) => {
-      const path = new URL(request.raw.url, origin);
-      if (!path.pathname.startsWith('/poc/')) throw invalid();
-      const headers = {};
-      for (const key of ['cookie', 'origin', 'sec-fetch-site']) if (request.headers[key]) headers[key] = request.headers[key];
-      if (request.method === 'POST') headers['content-type'] = 'application/json';
-      let response;
-      try {
-        response = await fetch(new URL(path.pathname + path.search, simulator), {
-          method: request.method, headers, redirect: 'error', signal: AbortSignal.timeout(5000),
-          ...(request.method === 'POST' ? { body: JSON.stringify(request.body ?? {}) } : {}),
-        });
-      } catch { throw new ApiError(502, 'PLATFORM_UNAVAILABLE', '测试平台暂时不可用'); }
-      for (const key of ['content-type', 'set-cookie']) if (response.headers.has(key)) reply.header(key, response.headers.get(key));
-      return reply.code(response.status).send(await response.text());
-    } });
-    app.get('/poc', (request, reply) => reply.redirect('/poc/'));
-  }
   app.get(basePath, (request, reply) => reply.redirect(`${basePath}/${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, 308));
   await app.register(staticFiles, { root: fileURLToPath(new URL('../../out/', import.meta.url)), prefix: `${basePath}/`, index: ['index.html'] });
   try { await db.query('SELECT 1'); } catch (error) { await app.close(); throw error; }

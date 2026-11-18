@@ -1,10 +1,10 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Modal, message } from 'antd';
+import { message } from 'antd';
 import { Star, SearchX, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { demoMode, loadWorkbench, openPlatformEntry, PortalRequestError, request } from '@/lib/portal-api';
+import { loadWorkbench, openPlatformEntry, PortalRequestError, request } from '@/lib/portal-api';
 import type { Bootstrap, Entry, Page, Report, WorkbenchData } from '@/lib/portal-model';
 
 const REFRESH_MS = 10 * 60 * 1000;
@@ -66,7 +66,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const workbench = usePortalRequest<WorkbenchData>('/workbench', loadWorkbench);
   const pendingRef = useRef(new Set<string>());
   const [pending, setPending] = useState<string[]>([]);
-  const [preview, setPreview] = useState<Entry | null>(null);
   const [toast, holder] = message.useMessage();
   const currentFavorites = result.data?.favoriteIds ?? [];
   async function toggleFavorite(entry: Entry) {
@@ -89,15 +88,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     finally { pendingRef.current.delete(entry.id); setPending([...pendingRef.current]); }
   }
   function open(entry: Entry) {
-    if (demoMode) { setPreview(entry); return; }
     try { openPlatformEntry(entry, result.data?.platform); } catch (error) { toast.error((error as Error).message); }
   }
   if (!result.data) return <div className="portal-shell"><div className="startup panel"><h1>云南白药集团 · 数据门户</h1><RequestState {...result} /></div></div>;
   return <PortalContext.Provider value={{ bootstrap: result.data, favorites: currentFavorites, pending, workbench, toggleFavorite, open }}>
     {holder}{children}
-    <Modal open={!!preview} title="报表预览 · 演示模式" onCancel={() => setPreview(null)} footer={<button className="primary-button" onClick={() => setPreview(null)}>知道了</button>}>
-      <p className="preview-title">{preview?.name}</p><p>当前使用示例数据，尚未连接帆软报表。接入平台后，此操作将在平台标签页中打开对应报表。</p>
-    </Modal>
   </PortalContext.Provider>;
 }
 export function FavoriteButton({ entry }: { entry: Entry }) {

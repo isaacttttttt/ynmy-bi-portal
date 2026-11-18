@@ -1,12 +1,11 @@
 # 数据门户接口契约 v1
 
-本契约由 `backend/src/app.js` 实现。本次将入口迁移至 `/portal/`，部署时需同时更新前后端镜像及代理配置；文档不代表线上环境已更新。部署、数据库适配和验收方法见 [后端交接](BACKEND_HANDOFF.md)。
+本契约由 `backend/src/app.js` 实现。本次将入口迁移至 `/portal/`，部署时需同时更新前后端镜像及代理配置；文档不代表线上环境已更新。部署、数据库适配和验收方法见 [正式部署指南](../deploy/README.md)。
 
 ## 接入约定
 
 - 基础路径：`/portal/api/portal/v1`，通过 `NEXT_PUBLIC_PORTAL_API_BASE` 指定。
 - 前端静态导出，由帆软页面以 iframe 嵌入。推荐门户、BFF、帆软通过反向代理同源部署。
-- `NEXT_PUBLIC_PORTAL_MODE=demo` 使用浏览器内模拟接口；`api` 使用真实 HTTP。真实接口失败时显示错误，绝不降级为演示数据。
 - 身份来自服务端验证的当前平台会话。请求使用 `credentials: include`，不接收浏览器自报的 `userId` 或权限集合。不把平台 token 写入 URL、localStorage 或日志。
 - 客户的 `trusted-cookie` 模式沿用主平台校验：`fine_login_users` 对应 `dim_bi_user.id`；包含多个 ID 时，用当前 token 的 `sub` 匹配其中用户的 `username`。访问记录通过 `dim_bi_visit_log.user_code = dim_bi_user.username` 查询。
 - 写请求须由 BFF 校验同源 Origin / CSRF，CORS 不得使用通配来源并允许携带凭据。
@@ -152,7 +151,7 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 - 取消：`POST /v10/favorite/entry/:id?fakeMethod=DELETE`
 - 示例成功标记：响应 `data === "success"`。上线时仍须核对部署版本，不能只以 HTTP 200 判断成功。
 
-收藏也建议通过 BFF 适配平台差异；浏览器不直接读取父窗口的 `fine_auth_token`。只有演示收藏使用 `ynby.portal.demo.favorites.v1` 本地存储，与正式平台完全隔离。
+收藏也建议通过 BFF 适配平台差异；浏览器不直接读取父窗口的 `fine_auth_token`。
 
 ## GET /notices
 

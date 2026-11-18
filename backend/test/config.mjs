@@ -31,8 +31,8 @@ try {
   assert.deepEqual(calls.slice(0,5), [['GET','/customer/session'],['GET','/customer/tree'],['GET','/different/favorites'],['PUT','/customer/saved/report-1'],['DELETE','/customer/saved/report-1']]);
   await assert.rejects(platform.context({ headers: { cookie: 'fine_auth_token=verified-token' } }), { statusCode: 401 });
   assert.throws(() => platformClient({ ...env, FINE_TREE_PATH: '//other.example/tree' }));
-  process.env.PUBLIC_ORIGIN = 'https://customer.example'; process.env.FINE_ROOT_ID = 'report-1'; process.env.PORTAL_DATA_MODEL = 'source';
-  delete process.env.POC_PLATFORM_URL;
+  process.env.PUBLIC_ORIGIN = 'https://customer.example'; process.env.FINE_ROOT_ID = 'report-1';
+  process.env.POC_PLATFORM_URL = 'http://127.0.0.1:1';
   app = await buildApp({ platform, db: { query: async sql => ({ rows: sql.includes('max(day_id)') ? [{ day: '2026-11-05' }] : [] }), end: async () => {} } });
   const response = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: { cookie: 'customer_token=verified-token' } });
   assert.equal(response.statusCode, 200);
@@ -52,8 +52,9 @@ try {
     assert.equal(resource.statusCode, 200, url);
     assert.equal(resource.headers['cache-control'], cache, url);
   }
-  for (const url of ['/', '/assets/company_title.png', '/api/portal/v1/bootstrap', '/portal/api/portal/v1/missing']) {
+  for (const url of ['/', '/poc', '/poc/', '/poc/login', '/assets/company_title.png', '/api/portal/v1/bootstrap', '/portal/api/portal/v1/missing']) {
     assert.equal((await app.inject(url)).statusCode, 404, url);
   }
+  assert.equal((await app.inject({ method: 'POST', url: '/poc/login', payload: {} })).statusCode, 404);
   console.log('PASS: custom endpoints, methods, cookie, icon template, public runtime config and permission filtering.');
 } finally { if (app) await app.close(); await new Promise(resolve => server.close(resolve)); }

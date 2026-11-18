@@ -1,8 +1,7 @@
-import type { Bootstrap, Notice, Page, Report, ReportPage, Filters, WorkbenchTab, WorkbenchData, Entry, SearchCategory } from './portal-model';
+import type { Bootstrap, Notice, Page, Report, ReportPage, Filters, WorkbenchData, Entry, SearchCategory } from './portal-model';
 import { safeUrl } from './portal-model';
 import portalConfig from '../config/portal.json';
 
-export const demoMode = (process.env.NEXT_PUBLIC_PORTAL_MODE || 'demo') === 'demo';
 const apiBase = process.env.NEXT_PUBLIC_PORTAL_API_BASE || `${portalConfig.basePath}/api/portal/v1`;
 export const platformBase = process.env.NEXT_PUBLIC_FINE_BASE || '/webroot/decision';
 export interface Endpoints {
@@ -12,16 +11,6 @@ export class PortalRequestError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 export async function request<T>(path: string, signal?: AbortSignal, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
-  if (demoMode) {
-    const { mockRequest } = await import('./portal-mock');
-    await new Promise<void>((resolve, reject) => {
-      if (signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
-      const abort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
-      const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, 180);
-      signal?.addEventListener('abort', abort, { once: true });
-    });
-    return mockRequest(path, body, method) as T;
-  }
   const response = await fetch(`${apiBase}${path}`, {
     method, credentials: 'include', cache: 'no-store', signal,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
@@ -42,18 +31,7 @@ export function reportPath(q: string, filters: Filters, page: number, category: 
   return `/reports?${params}`;
 }
 export async function loadWorkbench(path: string, signal?: AbortSignal): Promise<WorkbenchData> {
-  if (!demoMode) return request<WorkbenchData>(`${path}/snapshot`, signal);
-  const tabs: WorkbenchTab[] = ['recent', 'frequent', 'favorites'];
-  const lists = await Promise.all(tabs.map(async tab => {
-    const first = await request<Page<Report>>(`${path}?tab=${tab}&page=1&pageSize=100`, signal);
-    const items = [...first.items];
-    for (let page = 2; page <= Math.ceil(first.total / first.pageSize); page++) {
-      const next = await request<Page<Report>>(`${path}?tab=${tab}&page=${page}&pageSize=${first.pageSize}`, signal);
-      items.push(...next.items);
-    }
-    return items;
-  }));
-  return { recent: lists[0], frequent: lists[1], favorites: lists[2] };
+  return request<WorkbenchData>(`${path}/snapshot`, signal);
 }
 
 type PlatformWindow = Window & {

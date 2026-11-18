@@ -4,10 +4,10 @@
 
 ## 1. 导入镜像、填写配置
 
-在本文件所在目录执行：
+从 `main` 构建镜像。按部署批次保留镜像版本，将其通过 `PORTAL_IMAGE` 指定给 Compose。使用默认标签 `customer-main` 的离线包可直接执行以下命令。
 
 ```bash
-docker load -i ynmy-bi-portal-customer-20261116-r9-linux-amd64.tar
+docker load -i ynmy-bi-portal-customer-main-linux-amd64.tar
 cp conf/portal.env.example conf/portal.env
 vi conf/portal.env
 mkdir -p logs
@@ -28,7 +28,7 @@ tail -f logs/portal.log
 
 默认端口为 3001。可用 `PORTAL_HTTP_PORT=8081 docker compose -f compose.yaml up -d` 修改宿主机端口，容器内部仍使用 3001。
 
-不使用 Compose 时，也可用 `docker run -d --name bi-portal --restart unless-stopped -p 3001:3001 --env-file ./conf/portal.env -v "$PWD/logs:/app/logs" ynmy-bi-portal:customer-20261116-r9`。这种方式把文件转为容器环境变量，改文件后需要删除并重新创建该容器，单纯 restart 不会重新读取 env-file。
+不使用 Compose 时，也可用 `docker run -d --name bi-portal --restart unless-stopped -p 3001:3001 --env-file ./conf/portal.env -v "$PWD/logs:/app/logs" ynmy-bi-portal:customer-main`。这种方式把文件转为容器环境变量，改文件后需要删除并重新创建该容器，单纯 restart 不会重新读取 env-file。
 
 ## 2. 必填项与平台接口
 
@@ -147,9 +147,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.portal_search_history TO portal_r
 
 `/health` 只检查服务和 PG 连接，不代表帆软接口已经联通。正式验收应在平台中用实际账号打开门户，核对目录权限、三类工作台、搜索、收藏/取消收藏、报表打开、公告部门权限及无权限账号。
 
-镜像不执行建表、清库或示例数据初始化。客户配置不得设置 `POC_PLATFORM_URL`。备份挂载配置，并保留上一版镜像；回退时指定原 `PORTAL_IMAGE` 后重新创建容器。业务底表由客户维护，不包含在交付镜像或压缩包内。
+镜像不执行建表、清库或示例数据初始化。正式部署从 `main` 构建。备份挂载配置，并保留上一版镜像；回退时指定原 `PORTAL_IMAGE` 后重新创建容器。业务底表由客户维护，不包含在交付镜像或压缩包内。
 
-重新构建：在项目根目录执行 `docker build --platform linux/amd64 -t ynmy-bi-portal:customer-20261116-r9 .`，再执行 `docker save -o ynmy-bi-portal-customer-20261116-r9-linux-amd64.tar ynmy-bi-portal:customer-20261116-r9`。不要用 Docker build args 或 COPY 把客户密码写进镜像。
+重新构建：在项目根目录执行 `docker build --platform linux/amd64 -t ynmy-bi-portal:customer-main .`，再执行 `docker save -o ynmy-bi-portal-customer-main-linux-amd64.tar ynmy-bi-portal:customer-main`。不要用 Docker build args 或 COPY 把客户密码写进镜像。
 
 快捷入口无用户权限过滤，仅显示 `status=1`，按 `sort_no` 升序、相同排序号按 `app_id` 排序。最新附件的两条快捷入口都是 `status=0`；是否启用由填报维护。
 

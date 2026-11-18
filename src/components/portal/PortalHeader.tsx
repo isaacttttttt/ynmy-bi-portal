@@ -1,7 +1,6 @@
 "use client";
 import Link from 'next/link';
 import { BookOpen, ArrowLeft, LayoutGrid, List } from 'lucide-react';
-import { demoMode } from '@/lib/portal-api';
 import type { SearchCategory } from '@/lib/portal-model';
 import { DisplayModeSwitch } from './PortalViewport';
 import PortalGuide from './PortalGuide';
@@ -12,7 +11,7 @@ export default function PortalHeader({ dictionary = false, query = '', category,
     <div className="brand-row">
       <Link href="/" className="brand-logo" aria-label="云南白药数据门户首页"><img src="/portal/assets/company_title.png" alt="云南白药 YUNNANBAIYAO" /></Link>
       <div className="brand-copy"><h1>{dictionary ? '数据门户 · 报表字典' : '云南白药集团 · 数据门户'}</h1>{!dictionary && <p>数据驱动经营 · 智慧赋能决策</p>}</div>
-      <div className="header-tools"><DisplayModeSwitch /><div className="header-help"><span className="environment-label">{demoMode ? '演示环境 · 示例数据' : '企业数据门户'}</span><PortalGuide dictionary={dictionary} /></div>
+      <div className="header-tools"><DisplayModeSwitch /><div className="header-help"><span className="environment-label">企业数据门户</span><PortalGuide dictionary={dictionary} /></div>
         {dictionary && <Link href="/" className="home-link"><ArrowLeft size={14} />返回首页</Link>}
       </div>
     </div>
