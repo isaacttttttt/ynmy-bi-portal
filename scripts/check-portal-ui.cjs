@@ -14,7 +14,7 @@ if (mockHttp) {
 (async () => {
   const browser = await chromium.launch({ headless: true, channel: process.env.BROWSER_CHANNEL || 'msedge' });
   const context = await browser.newContext({ viewport: { width:1920, height:1080 } });
-  await context.addInitScript(() => { try { localStorage.setItem('ynby.portal.guide.v1', 'done'); } catch {} });
+  await context.addInitScript(() => { try { localStorage.setItem('ynby.portal.guide.v1', 'done'); if (!localStorage.getItem('ynby.portal.display-mode')) localStorage.setItem('ynby.portal.display-mode', 'current'); } catch {} });
   const page = await context.newPage();
   page.setDefaultTimeout(60000);
   const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -22,7 +22,7 @@ if (mockHttp) {
   const reads = [];
   let accessKey, initialFavorite;
   const liveWrite = async (url, data) => {
-    const response = await context.request.fetch(base + url, {method:url.startsWith('/portal/api/')?'PUT':'POST',headers:{Origin:base},data});
+    const response = await context.request.fetch(base + url, {method:'POST',headers:{Origin:base},data});
     assert.equal(response.status(),200,url); return response;
   };
   if (livePoc) {
@@ -42,7 +42,7 @@ if (mockHttp) {
     if ((refreshMode === 'failure' && endpoint === '/workbench') || refreshMode === 'expired') {
       await route.fulfill({ status:refreshMode === 'expired' ? 401 : 503, json:{success:false} }); return;
     }
-    const data = structuredClone(mockRequest(endpoint + url.search, request.method() === 'PUT' ? request.postDataJSON() : undefined, request.method()));
+    const data = structuredClone(mockRequest(endpoint + url.search, request.method() === 'POST' ? request.postDataJSON() : undefined, request.method()));
     if (refreshMode === 'updated' && endpoint === '/workbench') data.items[0].name = '后台更新后的报表';
     await route.fulfill({json:{success:true,data}});
   });
@@ -82,13 +82,17 @@ if (mockHttp) {
     await page.getByRole('button',{name:'我常用的',exact:true}).click();
     await page.getByText('近30天访问',{exact:true}).first().waitFor();
     const scroll = page.getByRole('region',{name:'工作台报表列表'});
-    assert(await scroll.evaluate(el => el.scrollHeight > el.clientHeight));
+    assert.equal(await page.locator('.workbench-card').count(), 8);
+    const cardRows = await page.locator('.workbench-card').evaluateAll(cards => cards.map(card => Math.round(card.getBoundingClientRect().top)));
+    assert.equal(new Set(cardRows).size, 2);
+    assert.equal(cardRows.filter(top => top === cardRows[0]).length, 4);
+    assert(await scroll.evaluate(el => el.scrollHeight <= el.clientHeight + 1));
     await page.mouse.move(0,0);
     assert.equal(await scroll.evaluate(el => getComputedStyle(el).getPropertyValue('--scroll-thumb').trim()),'transparent');
     await scroll.hover();
     assert.equal(await scroll.evaluate(el => getComputedStyle(el).getPropertyValue('--scroll-thumb').trim()),'#57B8FF');
     await page.mouse.move(0,0);
-    await scroll.evaluate(el => {el.scrollTop = 50;});
+    await scroll.evaluate(el => el.dispatchEvent(new Event('scroll')));
     await page.waitForFunction(() => document.querySelector('.panel-scroll').classList.contains('is-scrolling'));
     await page.waitForFunction(() => !document.querySelector('.panel-scroll').classList.contains('is-scrolling'));
     await page.getByRole('button',{name:'最近打开',exact:true}).click();
@@ -103,8 +107,9 @@ if (mockHttp) {
     await page.getByRole('button',{name:/销售专题分析/}).click();
     await page.getByRole('button',{name:/区域销售.*个对象/}).click();
     await page.locator('.topic-card').filter({hasText:'区域销售排名报表'}).waitFor();
-    assert.equal(await page.locator('.breadcrumbs button').count(),4);
-    await page.getByRole('combobox',{name:'选择事业群'}).selectOption('clinical');
+    assert.equal(await page.locator('.breadcrumbs [data-slot="breadcrumb-item"]').count(),4);
+    await page.getByRole('button',{name:'选择事业群'}).click();
+    await page.getByRole('menuitem',{name:'临床事业群'}).click();
     await page.locator('.topic-card').filter({hasText:'终端数据面板'}).waitFor();
     await page.getByRole('button',{name:/云南白药集团数据门户管理办法/}).click();
     await page.getByRole('button',{name:'我知道了',exact:true}).click();
@@ -120,7 +125,7 @@ if (mockHttp) {
     await page.getByRole('button',{name:'清除全部条件'}).click();
     await page.locator('.dictionary-card').nth(5).waitFor();
     await page.getByRole('checkbox',{name:/供应链中心/}).check();
-    await page.getByRole('heading',{name:'库存周转分析',exact:true}).waitFor();
+    await page.getByRole('heading',{name:/^库存周转分析/}).waitFor();
     assert.equal(await page.locator('.dictionary-card').count(),2);
     await page.getByRole('button',{name:'列表视图'}).click();
     await page.locator('.dictionary-list').waitFor();
@@ -236,7 +241,8 @@ if (mockHttp) {
       await portal.locator('.workbench-card .card-main').first().click();
       await page.frameLocator('#report').getByText('这是 Railway 上的帆软模拟预览，不包含真实业务报表。',{exact:true}).waitFor();
       await page.locator('#close').click();
-      await portal.getByRole('combobox',{name:'选择事业群'}).selectOption('clinical');
+      await portal.getByRole('button',{name:'选择事业群'}).click();
+      await portal.getByRole('menuitem',{name:'临床事业群'}).click();
       await portal.getByRole('button',{name:/终端数据面板.*BI 分析/}).click();
       await page.frameLocator('#report').getByRole('heading',{name:'终端数据面板'}).waitFor();
       await page.locator('#close').click();

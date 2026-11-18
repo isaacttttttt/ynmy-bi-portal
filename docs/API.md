@@ -82,9 +82,13 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 | page | 正整数 / 1 | 非整数、负数返回400 |
 | pageSize | 正整数 / 6 | 1–100 |
 
+所属组织使用 `dim_bi_report_dictionary.business_group`，映射为 `Report.businessGroup`；Owner 部门仍使用 `belonging_department`。
+
 同组多选 OR，组间 AND；空数组表示不限。默认无筛选。默认按元数据 `sort_no`、`metadataId` 稳定排序。切换搜索或筛选，前端重置第一页；搜索和筛选保存在 URL，支持刷新和浏览器前后退。
 
 `data` 包含 `items: Report[]`、`total`、`page`、`pageSize`、`facets`。`facets` 的五个键与筛选键相同，每组是 `{value:string,count:number}[]`。计数应用关键词和其他组条件，忽略本组条件，保留计数为0的可见选项。总数计算应用所有条件。
+
+正式底表的访问统计查询超时时，`/reports` 仍返回字典元数据及其他筛选结果，设置 `visitStatsUnavailable: true`、`views: null` 和 `facets.volume: []`。本次响应暂停应用 `volume` 条件，统计恢复后再次请求即恢复该条件。若 `/bootstrap` 读访问日志截止日超时，`dataAsOf` 返回 `null`，其余初始化数据正常返回。
 
 Report 示例（卡片和详情使用同一对象，避免底表未就绪时增加空的详情接口）：
 
@@ -92,7 +96,7 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 {
   "id":"entry-123","metadataId":"1001","parentId":"health","name":"经营分析",
   "type":"bi","templateId":"publish-task-id","sort":1,
-  "description":"报表介绍","module":"运营","department":"经营管理部",
+  "description":"报表介绍","module":"运营","businessGroup":"健康品事业群","department":"经营管理部",
   "owner":"业务负责人","developer":"开发负责人","developerDepartment":"数据开发部",
   "permission":"granted","onlineOn":null,"updateNote":"","frequency":"T+1","status":"active",
   "source":"ERP + 财务系统","metrics":["销售额","达成率"],
@@ -116,24 +120,24 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 | 请求 | 参数 | 成功 data |
 | --- | --- | --- |
 | GET /search-history | query: `category=all|report|tag|metric` | `{items:[{query,searchedAt}]}` |
-| PUT /search-history | JSON: `{"category":"report","query":"经营分析"}` | 当前类别最新 items |
-| DELETE /search-history | query: `category=all|report|tag|metric` | `{items:[]}` |
+| POST /search-history | JSON: `{"category":"report","query":"经营分析"}` | 当前类别最新 items |
+| POST /search-history/clear | query: `category=all|report|tag|metric` | `{items:[]}` |
 
-用户身份只取已验证会话，不能传 userId。读、写、清空均限定当前用户和类别；PUT 和 DELETE 校验同源 Origin。仅确认搜索、点击历史或选择结果时保存，不记录每次键入。关键词最多200字符，空白折叠并去首尾空白，空词拒绝保存；英文忽略大小写去重，重复搜索更新显示文本和时间。每人每类保留最近20条。`searchedAt` 为 UTC ISO 8601，按时间降序、标准化关键词升序稳定排序。
+用户身份只取已验证会话，不能传 userId。读、写、清空均限定当前用户和类别；POST 校验同源 Origin。仅确认搜索、点击历史或选择结果时保存，不记录每次键入。关键词最多200字符，空白折叠并去首尾空白，空词拒绝保存；英文忽略大小写去重，重复搜索更新显示文本和时间。每人每类保留最近20条。`searchedAt` 为 UTC ISO 8601，按时间降序、标准化关键词升序稳定排序。
 
-表 `portal_search_history` 在 `backend/sql/003-search-history.sql` 定义。主键 `(user_code,category,query_key)` 负责去重；索引 `(user_code,category,searched_at DESC,query_key)` 支持最近列表、清空和保留条数查询。请求日志包含搜索参数，token、Cookie 值及密码字段不落盘。`PORTAL_LOG_FILE` 指定 JSON 行日志文件，未配置则输出到容器标准输出。业务底表账号只对此表额外获得读写权限，其余业务表仍只读。
+表 `portal_search_history` 在 `backend/sql/003-search-history.sql` 定义。主键 `(user_code,category,query_key)` 负责去重；索引 `(user_code,category,searched_at DESC,query_key)` 支持最近列表、清空和保留条数查询。请求日志包含搜索参数，token、Cookie 值及密码字段不落盘。`PORTAL_LOG_FILE` 指定 JSON 行日志文件，未配置则输出到容器标准输出。失败日志包含接口、方法、requestId、错误码、具体原因和调用堆栈；PostgreSQL 提供表、列或约束名称时一并记录。标准 Compose 将文件挂载到部署目录的 `logs/portal.log`。业务底表账号只对此表额外获得读写权限，其余业务表仍只读。
 
 ## GET /workbench
 
-参数：`tab=recent|frequent|favorites`、`page=1`、`pageSize=8`（默认，允许1–100）。返回 `Page<Report>`，不带 facets。当前前端每批请求100条，按返回的 `pageSize` 继续读取后续页，合并三类完整列表后更新缓存；界面使用内部滚动，不显示工作台分页。
+参数：`tab=recent|frequent|favorites`、`page=1`、`pageSize=8`（默认，允许1–100）。返回 `Page<Report>`，不带 facets。前端使用 `GET /workbench/snapshot` 一次读取 `{recent,frequent,favorites}`，每10分钟静默更新；切换标签使用缓存。最近打开、我常用的各最多8条，显示为两行四列；收藏保留全部并支持内部滚动。
 
-- recent：当前用户、在用且有权限的报表；按最近访问日降序，日期相同时用入口 ID 稳定排序。
-- frequent：当前用户近30个自然日的访问量降序；以 `SUM(visit_num)` 聚合，不能 `COUNT(*)` 数日汇总行数。必须注明数据截止日。
+- recent：当前用户、在用且有权限的报表；按最近访问日降序，日期相同时用入口 ID 稳定排序，取前8条。
+- frequent：当前用户近30个自然日的访问量降序；以 `SUM(visit_num)` 聚合，不能 `COUNT(*)` 数日汇总行数。次数相同时按入口 ID 排序，取前8条，并注明数据截止日。
 - favorites：平台收藏列表与权限、在用报表取交集。缺少元数据的收藏需要底表补齐后才能进入当前工作台；专题收藏仍然以平台入口 ID 保存。
 
 当前底表只有日粒度，前端展示访问日期，不显示“几小时前”。若以后要展示分钟级，ETL 必须保留真实 `last_visited_at`。
 
-## PUT /favorites/:entryId
+## POST /favorites/:entryId
 
 ```json
 {"favorite":true}

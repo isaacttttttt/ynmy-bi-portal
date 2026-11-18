@@ -36,9 +36,9 @@ Railway 服务配置：
 
 `FINE_BASE_URL` 指向模拟平台内网 `/webroot/decision`；`FINE_SESSION_PATH=/poc/session`。`POC_PLATFORM_URL` 仅在测试环境设置，启用 `/poc/*` 代理。正式环境应移除此变量和模拟平台服务。
 
-预部署脚本按 `portal_migration_log` 的 `mysql-to-pg-v1` 标记执行一次迁移：以只读一致性快照读取旧 MySQL，将业务测试数据、收藏、会话和搜索历史写入 PG，在同一事务中验证行数后提交。目标表非空且没有迁移标记时拒绝覆盖；失败回滚，重复部署跳过数据导入。MySQL 驱动仅供此次迁移，运行时只使用 pg。正式底表后续接入，不把迁移的示例数据视作真实业务数据。
+模拟环境使用 PostgreSQL。现有环境可直接重复部署。新建模拟库时先恢复 PostgreSQL 示例数据，再运行 `node backend/poc/seed.js`。该脚本检查数据批次，补齐表和索引并配置访问权限。
 
-模拟服务预部署使用 `PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE` 管理员引用；运行时仍使用 `DB_*`，但指向 PG，分别为两个受限角色。旧 `MYSQL*` 变量仅作首次迁移来源。业务详情新增可空 `online_date` 与 `last_update_note`，未维护字段不自动填充。以后已有 PG 表的结构调整应另建迁移，不依赖 CREATE TABLE IF NOT EXISTS 改列。
+模拟服务预部署使用 `PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE` 管理员引用，运行时用 `DB_*` 指向 PostgreSQL，分别使用两个受限角色。业务详情的 `online_date` 和 `last_update_note` 可以为空。已有 PG 表的结构调整通过单独的迁移脚本执行。
 
 ## 权限与数据链路
 

@@ -27,7 +27,7 @@ if (process.argv.includes('--prepare-restart')) {
   const cookie = await login('admin');
   const before = await call(api + '/bootstrap', { cookie });
   await writeFile(restartFile, JSON.stringify({ cookie, favorite: before.favoriteIds.includes('entry-1') }));
-  await call(api + '/favorites/entry-1', { cookie, method: 'PUT', body: { favorite: true } });
+  await call(api + '/favorites/entry-1', { cookie, method: 'POST', body: { favorite: true } });
   console.log('Prepared: session and favorite stored; restart the cloud services, then run --verify-restart.');
   process.exit(0);
 }
@@ -35,7 +35,7 @@ if (process.argv.includes('--verify-restart')) {
   const saved = JSON.parse(await readFile(restartFile, 'utf8'));
   const after = await call(api + '/bootstrap', { cookie: saved.cookie });
   assert.ok(after.favoriteIds.includes('entry-1'), 'Favorite and authenticated session must survive service restarts');
-  await call(api + '/favorites/entry-1', { cookie: saved.cookie, method: 'PUT', body: { favorite: saved.favorite } });
+  await call(api + '/favorites/entry-1', { cookie: saved.cookie, method: 'POST', body: { favorite: saved.favorite } });
   await call('/poc/logout', { cookie: saved.cookie, method: 'POST', body: {} });
   await unlink(restartFile);
   console.log('PASS: session and favorite survived service restarts; original favorite state restored.');
@@ -51,7 +51,7 @@ await call(api + '/bootstrap', { status: 401 });
 await call('/poc/login', { method: 'POST', body: { user: 'admin', accessKey: 'invalid' }, status: 403 });
 const admin = await login('admin'), clinical = await login('clinical'), empty = await login('empty');
 const control = body => call('/poc/control', { cookie: admin, method: 'POST', body: { accessKey, ...body } });
-const favorite = (cookie, id, value, options = {}) => call(api + '/favorites/' + id, { cookie, method: 'PUT', body: { favorite: value }, ...options });
+const favorite = (cookie, id, value, options = {}) => call(api + '/favorites/' + id, { cookie, method: 'POST', body: { favorite: value }, ...options });
 const initial = await call(api + '/bootstrap', { cookie: admin });
 const touched = ['entry-1', 'unmapped'];
 try {
@@ -88,8 +88,8 @@ try {
   const snapshots={};
   for(const category of ['all','report','tag','metric']) snapshots[category]=await call(api+'/search-history?category='+category,{cookie:empty});
   const otherHistory=await call(api+'/search-history?category=report',{cookie:clinical});
-  const historyWrite=(category,query,options={})=>call(api+'/search-history',{cookie:empty,method:'PUT',body:{category,query},...options});
-  const historyClear=(category,options={})=>call(api+'/search-history?category='+category,{cookie:empty,method:'DELETE',...options});
+  const historyWrite=(category,query,options={})=>call(api+'/search-history',{cookie:empty,method:'POST',body:{category,query},...options});
+  const historyClear=(category,options={})=>call(api+'/search-history/clear?category='+category,{cookie:empty,method:'POST',...options});
   try {
     for(const category of ['all','report','tag','metric']) await historyClear(category);
     await historyWrite('report','  ROI  ');
@@ -107,7 +107,7 @@ try {
     await historyWrite('report','   ',{status:400});await historyWrite('report','x'.repeat(201),{status:400});await historyWrite('other','x',{status:400});
     await historyWrite('report','x',{origin:'https://untrusted.invalid',status:403});
     await historyClear('report',{origin:'https://untrusted.invalid',status:403});
-    await call(api+'/search-history',{cookie:empty,method:'PUT',body:{category:'report',query:'x',userId:'admin'},status:400});
+    await call(api+'/search-history',{cookie:empty,method:'POST',body:{category:'report',query:'x',userId:'admin'},status:400});
     await call(api+'/search-history?category=report',{status:401});
     await historyClear('report');
     assert.equal((await call(api+'/search-history?category=report',{cookie:empty})).items.length,0);
@@ -145,8 +145,8 @@ try {
   await favorite(admin, 'entry-15', true, { status: 409 });
   await favorite(admin, 'topics', true, { status: 404 });
   await favorite(admin, 'entry-1', true, { origin: 'https://untrusted.example', status: 403 });
-  await call(api + '/favorites/entry-1', { cookie: admin, method: 'PUT', body: { favorite: 'true' }, status: 400 });
-  await call(api + '/favorites/entry-1', { cookie: admin, method: 'PUT', body: { favorite: true, userId: 'admin' }, status: 400 });
+  await call(api + '/favorites/entry-1', { cookie: admin, method: 'POST', body: { favorite: 'true' }, status: 400 });
+  await call(api + '/favorites/entry-1', { cookie: admin, method: 'POST', body: { favorite: true, userId: 'admin' }, status: 400 });
   await favorite(admin, 'entry-1', true); await favorite(admin, 'entry-1', true);
   assert.equal((await call(api + '/bootstrap', { cookie: admin })).favoriteIds.filter(id => id === 'entry-1').length, 1);
   assert.ok(!(await call(api + '/bootstrap', { cookie: clinical })).favoriteIds.includes('entry-1'));

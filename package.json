@@ -2,6 +2,9 @@
   "name": "ynmy-bi-portal",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24.22.3 <25"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

@@ -50,7 +50,9 @@ export async function buildApp({ platform, db = createPool() } = {}) {
   app.addHook('onResponse', async (request, reply) => { app.log.info({ requestId: request.id, route: request.routeOptions.url, method: request.method, status: reply.statusCode, durationMs: reply.elapsedTime }, 'request'); });
   app.setErrorHandler((error, request, reply) => {
     const status = error instanceof ApiError ? error.statusCode : error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : /^[0-9A-Z]{5}$/.test(error.code || '') || ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code) || error.message === 'Query read timeout' ? 503 : 500;
-    app.log.error({ requestId: request.id, code: error.code, status, reason: error instanceof ApiError ? error.message : undefined }, 'request failed');
+    request.log.error({ requestId: request.id, route: request.routeOptions.url, method: request.method,
+      code: error.code, status, reason: error.message, stack: error.stack,
+      schema: error.schema, table: error.table, column: error.column, constraint: error.constraint }, 'request failed');
     reply.code(status).send({ success: false, error: { code: error instanceof ApiError ? error.code : status === 400 ? 'INVALID_REQUEST' : status === 503 ? 'DATA_UNAVAILABLE' : 'SERVICE_ERROR', message: error instanceof ApiError ? error.message : status === 400 ? '请求参数不合法' : '服务暂时不可用，请重试' }, requestId: request.id });
   });
   app.setNotFoundHandler((request, reply) => reply.code(404).send({ success: false, error: { code: 'NOT_FOUND', message: '接口不存在' }, requestId: request.id }));
@@ -58,13 +60,15 @@ export async function buildApp({ platform, db = createPool() } = {}) {
   await app.register(async api => {
     api.decorateRequest('portal', null);
     api.addHook('preHandler', async request => {
-      if (['PUT', 'DELETE'].includes(request.method)) requireOrigin(request, origin);
+      if (request.method === 'POST') requireOrigin(request, origin);
       request.portal = await platform.context(request);
     });
     api.get('/bootstrap', async request => {
       if (Object.keys(request.query).length) throw invalid();
       const context = request.portal;
-      const [favoriteIds, links, asOf] = await Promise.all([platform.favorites(context), quickEntries(db), dataAsOf(db)]);
+      const [favoriteIds, links, asOf] = await Promise.all([
+        platform.favorites(context), quickEntries(db), model === 'source' ? sourceRepository.bootstrapDate(db, request.log) : dataAsOf(db),
+      ]);
       const tree = context.ids.has(rootId) ? context.entries.filter(e => e.id === rootId).concat(descendants(context.entries, rootId)) : [];
       return { success: true, data: { user: { name: context.user.name }, rootId, entries: tree, favoriteIds, quickEntries: links, dataAsOf: asOf, platform: platform.browser } };
     });
@@ -75,13 +79,13 @@ export async function buildApp({ platform, db = createPool() } = {}) {
     api.get('/workbench', async request => {
       const query = pageQuery(request.query, { workbench: true, defaultSize: 8 });
       const [reports, favorites] = await Promise.all([reportsFor(db, request.portal), query.tab === 'favorites' ? platform.favorites(request.portal) : []]);
-      const items = workbenchItems(reports, favorites, query.tab);
+      const items = workbenchLists(reports, favorites, query.tab)[query.tab];
       return { success: true, data: paginate(items, query.page, query.pageSize) };
     });
     api.get('/workbench/snapshot', async request => {
       if (Object.keys(request.query).length) throw invalid();
       const [reports, favorites] = await Promise.all([reportsFor(db, request.portal), platform.favorites(request.portal)]);
-      return { success: true, data: Object.fromEntries(['recent', 'frequent', 'favorites'].map(tab => [tab, workbenchItems(reports, favorites, tab)])) };
+      return { success: true, data: workbenchLists(reports, favorites) };
     });
     api.get('/search', async request => {
       const { category, q } = searchQuery(request.query, true);
@@ -91,13 +95,13 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       const { category } = searchQuery(request.query);
       return { success: true, data: await searchHistory(db, request.portal.user.userName, category) };
     });
-    api.put('/search-history', { schema: { body: { type: 'object', required: ['category', 'query'], additionalProperties: false, properties: { category: { type: 'string', enum: [...searchCategories] }, query: { type: 'string', minLength: 1, maxLength: 200 } } } } }, async request => {
+    api.post('/search-history', { schema: { body: { type: 'object', required: ['category', 'query'], additionalProperties: false, properties: { category: { type: 'string', enum: [...searchCategories] }, query: { type: 'string', minLength: 1, maxLength: 200 } } } } }, async request => {
       if (Object.keys(request.query).length) throw invalid();
       const query = request.body.query.trim().replace(/\s+/g, ' ');
       if (!query) throw invalid();
       return { success: true, data: await saveSearch(db, request.portal.user.userName, request.body.category, query) };
     });
-    api.delete('/search-history', async request => {
+    api.post('/search-history/clear', async request => {
       const { category } = searchQuery(request.query);
       await db.query('DELETE FROM portal_search_history WHERE user_code = $1 AND category = $2', [request.portal.user.userName, category]);
       return { success: true, data: { items: [] } };
@@ -106,12 +110,12 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       const query = pageQuery(request.query, { defaultSize: 5 });
       return { success: true, data: paginate(await noticesFor(db, request.portal), query.page, query.pageSize) };
     });
-    api.put('/favorites/:entryId', { schema: { body: { type: 'object', required: ['favorite'], additionalProperties: false, properties: { favorite: { type: 'boolean' } } } } }, async request => {
+    api.post('/favorites/:entryId', { schema: { body: { type: 'object', required: ['favorite'], additionalProperties: false, properties: { favorite: { type: 'boolean' } } } } }, async request => {
       if (Object.keys(request.query).length) throw invalid();
       const context = request.portal, id = request.params.entryId;
       const entry = context.entries.find(e => e.id === id && e.type !== 'folder');
       if (!entry) throw new ApiError(404, 'NOT_FOUND', '报表不存在或无权访问');
-      const report = (await reportsFor(db, context)).find(r => r.id === id) || null;
+      const [report = null] = await reportsFor(db, { ...context, ids: new Set(context.ids.has(id) ? [id] : []) });
       if (request.body.favorite && report?.status === 'archived') throw new ApiError(409, 'REPORT_ARCHIVED', '已归档报表不能新增收藏');
       const favorites = await platform.favorites(context);
       if (favorites.includes(id) !== request.body.favorite) await platform.favorite(context, id, request.body.favorite);
@@ -145,9 +149,16 @@ export async function buildApp({ platform, db = createPool() } = {}) {
   return app;
 }
 
-function workbenchItems(reports, favorites, tab) {
-  const items = reports.filter(r => r.status === 'active' && (tab === 'favorites' ? favorites.includes(r.id) : tab === 'recent' ? r.lastVisitedOn : r.visits30d > 0));
-  if (tab === 'recent') items.sort((a, b) => b.lastVisitedOn.localeCompare(a.lastVisitedOn) || a.id.localeCompare(b.id));
-  if (tab === 'frequent') items.sort((a, b) => b.visits30d - a.visits30d || a.id.localeCompare(b.id));
-  return items;
+function workbenchLists(reports, favoriteIds, tab) {
+  const recent = [], frequent = [], favorites = [];
+  const saved = new Set(favoriteIds);
+  for (const report of reports) {
+    if (report.status !== 'active') continue;
+    if ((!tab || tab === 'recent') && report.lastVisitedOn) recent.push(report);
+    if ((!tab || tab === 'frequent') && report.visits30d > 0) frequent.push(report);
+    if (saved.has(report.id)) favorites.push(report);
+  }
+  recent.sort((a, b) => b.lastVisitedOn.localeCompare(a.lastVisitedOn) || a.id.localeCompare(b.id));
+  frequent.sort((a, b) => b.visits30d - a.visits30d || a.id.localeCompare(b.id));
+  return { recent: recent.slice(0, 8), frequent: frequent.slice(0, 8), favorites };
 }

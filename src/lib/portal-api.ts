@@ -11,7 +11,7 @@ export interface Endpoints {
 export class PortalRequestError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
-export async function request<T>(path: string, signal?: AbortSignal, body?: unknown, method = body === undefined ? 'GET' : 'PUT'): Promise<T> {
+export async function request<T>(path: string, signal?: AbortSignal, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
   if (demoMode) {
     const { mockRequest } = await import('./portal-mock');
     await new Promise<void>((resolve, reject) => {

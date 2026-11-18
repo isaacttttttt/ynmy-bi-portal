@@ -2,7 +2,8 @@
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Modal, message } from 'antd';
-import { Star, RefreshCw, SearchX, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Star, SearchX, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { demoMode, loadWorkbench, openPlatformEntry, PortalRequestError, request } from '@/lib/portal-api';
 import type { Bootstrap, Entry, Page, Report, WorkbenchData } from '@/lib/portal-model';
 
@@ -108,7 +109,8 @@ export function SectionTitle({ children }: { children: ReactNode }) {
   return <h2 className="section-title"><img src="/portal/assets/图标装饰@2x.png" alt="" />{children}</h2>;
 }
 export function RequestState({ loading, error, retry }: { loading?: boolean; error?: string; retry?: () => void }) {
-  return <div className="request-state" role={error ? 'alert' : 'status'}>{loading ? <><RefreshCw className="loading-spin" size={22} /><p>正在加载…</p></> : error ? <><p>{error}</p><button className="secondary-button" onClick={retry}>重新加载</button></> : <><SearchX size={30} /><p>暂无符合条件的内容</p><span>请调整搜索或筛选条件</span></>}</div>;
+  if (loading) return <div className="request-skeleton" role="status" aria-label="正在加载" aria-busy="true"><Skeleton className="h-10 w-10" /><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-5/6" /></div>;
+  return <div className="request-state" role={error ? 'alert' : 'status'}>{error ? <><p>{error}</p><button className="secondary-button" onClick={retry}>重新加载</button></> : <><SearchX size={30} /><p>暂无符合条件的内容</p><span>请调整搜索或筛选条件</span></>}</div>;
 }
 export function Pagination({ data, onChange }: { data: Pick<Page<unknown>, 'total' | 'page' | 'pageSize'>; onChange: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(data.total / data.pageSize));

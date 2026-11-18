@@ -13,12 +13,12 @@ export async function reportsFor(db, context) {
     FROM report_metadata m LEFT JOIN icon_repository i ON i.icon_id = m.icon_id
     LEFT JOIN (SELECT report_id, MAX(day_id) AS last_visited,
       SUM(CASE WHEN day_id >= ($1::date - 29) THEN visit_num ELSE 0 END) AS visits30d
-      FROM dim_bi_visit_log WHERE user_code = $2 AND day_id <= $1::date GROUP BY report_id) v ON v.report_id = m.fine_entry_id
+      FROM dim_bi_visit_log WHERE user_code = $2 AND report_id = ANY($3::text[]) AND day_id <= $1::date GROUP BY report_id) v ON v.report_id = m.fine_entry_id
     WHERE m.is_deleted = 0 AND m.fine_entry_id = ANY($3::text[]) ORDER BY m.sort_no, m.report_id`, [asOf, context.user.userName, [...context.ids]]);
   const entries = new Map(context.entries.map(e => [e.id, e]));
   return rows.filter(r => entries.get(r.fine_entry_id)?.type !== 'folder').map(r => ({
     ...entries.get(r.fine_entry_id), metadataId: String(r.report_id), description: r.report_desc || '',
-    module: r.business_module, department: r.report_owner_dept || '', owner: r.report_owner_name,
+    module: r.business_module, businessGroup: r.report_owner_dept || '', department: r.report_owner_dept || '', owner: r.report_owner_name,
     developer: r.dev_owner_name || '', developerDepartment: r.dev_owner_dept || '', permission: 'granted', onlineOn: r.online_date || null, updateNote: r.last_update_note || '', frequency: r.update_frequency, status: r.report_status === 1 ? 'active' : 'archived',
     source: r.source_system || '', metrics: r.core_metrics || [], views: Number(r.total_views),
     visits30d: Number(r.visits30d || 0), lastVisitedOn: r.last_visited || null, useScene: r.use_scene || '',

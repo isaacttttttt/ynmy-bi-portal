@@ -6,36 +6,83 @@ export async function dataAsOf(db) {
   return rows[0].day;
 }
 
+function visitReadTimedOut(error) {
+  return ['57014', '55P03'].includes(error.code) || error.message === 'Query read timeout';
+}
+
+export async function bootstrapDate(db, log) {
+  try {
+    return await dataAsOf(db);
+  } catch (error) {
+    if (!visitReadTimedOut(error)) throw error;
+    log.warn({ stage: 'visit-log-date', code: error.code, reason: error.message }, 'visit log date unavailable');
+    return null;
+  }
+}
+
 export async function reportsFor(db, context, dictionary = false) {
   if (!dictionary && !context.ids.size) return [];
-  const asOf = await dataAsOf(db);
-  const { rows } = await db.query(`SELECT ${dictionary ? 'd.report_id, d.id AS dictionary_id' : 'r.report_id'}, r.report_name AS catalog_name, r.report_type, ${dictionary ? 'd.report_id' : 'r.report_id'}=ANY($1::text[]) AS granted, d.report_name AS dictionary_name, d.report_description,
-      d.business_domain, d.belonging_department, d.suggested_owner_name, d.developer_name,
-      d.update_cycle, d.go_live_time::date::text AS online_on, d.usage_scenario,
-      d.core_metrics, d.metrics_calc_logic, d.data_source,
-      v.total_views, v.visits30d, v.last_visited
-    FROM ${dictionary ? 'dim_bi_report_dictionary d LEFT JOIN dim_bi_report_info_dtl r USING (report_id)' : 'dim_bi_report_info_dtl r LEFT JOIN dim_bi_report_dictionary d USING (report_id)'}
+  const metadata = `r.report_name AS catalog_name, r.report_type, d.report_name AS dictionary_name, d.report_description,
+      d.business_domain, d.business_group, d.belonging_department, d.suggested_owner_name, d.developer_name,
+      d.update_cycle, nullif(trim(d.go_live_time),'')::date::text AS online_on, d.usage_scenario,
+      d.core_metrics, d.metrics_calc_logic, d.data_source`;
+  const ids = [...context.ids];
+  let rows;
+  if (dictionary) {
+    const [catalog, visits] = await Promise.all([
+      db.query(`/* portal: dictionary metadata */ SELECT d.report_id, d.id AS dictionary_id,
+        d.report_id=ANY($1::text[]) AS granted, ${metadata}
+        FROM dim_bi_report_dictionary d LEFT JOIN dim_bi_report_info_dtl r USING (report_id)
+        ORDER BY coalesce(nullif(d.report_name,''),r.report_name), d.id`, [ids]),
+      dictionaryVisits(db, context),
+    ]);
+    rows = catalog.rows.map(row => ({ ...row, ...visits?.get(row.report_id),
+      total_views: visits === null ? null : visits.get(row.report_id)?.total_views ?? 0 }));
+  } else {
+    const asOf = await dataAsOf(db);
+    ({ rows } = await db.query(`SELECT r.report_id, r.report_id=ANY($1::text[]) AS granted, ${metadata},
+      coalesce(v.total_views, 0) AS total_views, v.visits30d, v.last_visited
+    FROM dim_bi_report_info_dtl r LEFT JOIN dim_bi_report_dictionary d USING (report_id)
     LEFT JOIN (
       SELECT report_id, sum(visit_num::bigint) AS total_views,
         sum(visit_num::bigint) FILTER (WHERE user_code=$2 AND day_id >= ($3::date - 29)::text) AS visits30d,
         max(day_id) FILTER (WHERE user_code=$2) AS last_visited
-      FROM dim_bi_visit_log WHERE ${dictionary ? 'report_id IN (SELECT report_id FROM dim_bi_report_dictionary)' : 'report_id=ANY($1::text[])'} AND day_id <= $3::text
+      FROM dim_bi_visit_log WHERE report_id=ANY($1::text[]) AND day_id <= $3::text
       GROUP BY report_id
     ) v USING (report_id)
-    WHERE ${dictionary ? 'TRUE' : 'r.report_id=ANY($1::text[])'} ORDER BY coalesce(nullif(d.report_name,''),r.report_name), ${dictionary ? 'd.id' : 'r.report_id'}`, [[...context.ids], context.user.userName, asOf]);
+    WHERE r.report_id=ANY($1::text[]) ORDER BY coalesce(nullif(d.report_name,''),r.report_name), r.report_id`, [ids, context.user.userName, asOf]));
+  }
   const entries = new Map(context.entries.map(entry => [entry.id, entry]));
   return rows.filter(row => entries.get(row.report_id)?.type !== 'folder').map(row => ({
     id: row.report_id || `dictionary:${row.dictionary_id}`, parentId: null, sort: 0,
     type: ['bi','fvs','frm','cpt','url'].includes(row.report_type?.toLowerCase()) ? row.report_type.toLowerCase() : 'cpt',
     ...entries.get(row.report_id), metadataId: row.dictionary_id || row.report_id, name: row.dictionary_name?.trim() || entries.get(row.report_id)?.name || row.catalog_name || '未命名报表',
-    description: row.report_description || '', module: row.business_domain || '', department: row.belonging_department || '',
+    description: row.report_description || '', module: row.business_domain || '', businessGroup: row.business_group?.trim() || '', department: row.belonging_department || '',
     owner: row.suggested_owner_name || '', developer: row.developer_name || '', developerDepartment: '',
     permission: row.granted ? 'granted' : 'denied', frequency: ({'实时数据':'实时','每日更新一次':'每日更新','每月更新一次':'月更新','其它':'其他'})[row.update_cycle] || row.update_cycle || '',
     status: 'active', onlineOn: row.online_on || null, updateNote: '',
     source: row.data_source || '', metrics: (row.core_metrics || '').split(/[、，,；;\n]+/).map(value=>value.trim().replace(/[。；;]+$/,'')).filter(Boolean),
     useScene: row.usage_scenario || '', calcLogic: row.metrics_calc_logic || '', updatedOn: '',
-    views: Number(row.total_views || 0), visits30d: Number(row.visits30d || 0), lastVisitedOn: row.last_visited || null,
+    views: row.total_views === null ? null : Number(row.total_views), visits30d: Number(row.visits30d || 0), lastVisitedOn: row.last_visited || null,
   }));
+}
+
+async function dictionaryVisits(db, context) {
+  try {
+    const { rows } = await db.query(`/* portal: dictionary visits */ WITH cutoff AS (
+        SELECT max(day_id) AS day FROM dim_bi_visit_log
+      ) SELECT v.report_id, sum(v.visit_num::bigint) AS total_views,
+        sum(v.visit_num::bigint) FILTER (WHERE v.user_code=$1 AND v.day_id >= (cutoff.day::date - 29)::text) AS visits30d,
+        max(v.day_id) FILTER (WHERE v.user_code=$1) AS last_visited
+      FROM dim_bi_visit_log v CROSS JOIN cutoff
+      WHERE v.day_id <= cutoff.day AND v.report_id IN (SELECT report_id FROM dim_bi_report_dictionary)
+      GROUP BY v.report_id`, [context.user.userName]);
+    return new Map(rows.map(row => [row.report_id, row]));
+  } catch (error) {
+    if (!visitReadTimedOut(error)) throw error;
+    context.log?.warn({ stage: 'dictionary-visits', code: error.code, reason: error.message }, 'dictionary visit stats unavailable');
+    return null;
+  }
 }
 
 export async function noticesFor(db, context) {

@@ -88,9 +88,9 @@ try{
  assert.equal((await call('/notices')).total,0,'Expired notices remain hidden');
  await client.query('ROLLBACK');await client.query('BEGIN');
  for(const category of ['all','report','tag','metric']){
-   await call('/search-history','PUT',{category,query:'PORTAL-QA'});
+   await call('/search-history','POST',{category,query:'PORTAL-QA'});
    const history=await call('/search-history?category='+category);assert.equal(history.items[0].query,'PORTAL-QA');
-   await call('/search-history?category='+category,'DELETE');assert.equal((await call('/search-history?category='+category)).items.length,0);
+   await call('/search-history/clear?category='+category,'POST');assert.equal((await call('/search-history?category='+category)).items.length,0);
  }
  await call('/search?category=invalid','GET',undefined,400);
  console.log(JSON.stringify({passed:true,apiChecks:checks,catalogReports:entries.length,notices:5,platform:'stubbed; no real platform authentication or directory claims'}));

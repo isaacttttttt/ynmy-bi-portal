@@ -18,6 +18,20 @@ assert.notEqual(query('', emptyFilters(), 2).items[0].id, query('').items[0].id)
 assert.deepEqual([99,100,1000,1001].map(volume), ['low','medium','medium','high']);
 const supply = query('', { ...emptyFilters(), organization: ['供应链中心'] });
 assert.equal(supply.facets.organization.find(v => v.value === '财务共享中心').count, reports.filter(r => r.department === '财务共享中心').length);
+const sample = [
+  { ...reports[0], name: 'Sample A', businessGroup: '甲', status: 'active', permission: 'granted', metrics: ['SKU', 'SKU'] },
+  { ...reports[0], name: 'Sample B', businessGroup: '乙', status: 'active', permission: 'granted', metrics: ['SKU'] },
+  { ...reports[0], name: 'Sample C', businessGroup: '丙', status: 'archived', permission: 'denied', metrics: ['SKU'] },
+  { ...reports[0], name: '其他', businessGroup: '丁', status: 'active', permission: 'granted', metrics: [] },
+];
+const crossFacets = queryReports(sample, { q: 'sample', filters: { ...emptyFilters(), organization: ['甲'], status: ['active'], permission: ['granted'] }, page: 1, pageSize: 6 });
+assert.deepEqual(crossFacets.items.map(r => r.name), ['Sample A']);
+assert.deepEqual(crossFacets.facets.organization, [
+  { value: '甲', count: 1 }, { value: '乙', count: 1 }, { value: '丙', count: 0 }, { value: '丁', count: 0 },
+]);
+const sku = searchCatalog(sample, 'all', ' sku ');
+assert.deepEqual(sku.items.map(item => [item.category, item.value]), [['report', 'Sample A'], ['report', 'Sample B'], ['metric', 'SKU']]);
+assert.equal(sku.items.at(-1).subtitle, '2 份相关报表');
 assert.deepEqual(breadcrumb(bootstrap.entries, 'region', 'topics').map(e => e.id), ['health','sales','region']);
 assert(descendants(bootstrap.entries, 'health').some(e => e.id === 'entry-8'));
 assert(!descendants(bootstrap.entries, 'health').some(e => e.id === 'entry-12'));
@@ -51,7 +65,7 @@ assert(queryReports(reports, {q:'供应链',category:'tag',filters:emptyFilters(
 mockRequest('/search-history', {category:'metric',query:' ROI '});
 assert.equal(mockRequest('/search-history', {category:'metric',query:'roi'}).items.length, 1);
 assert.equal(mockRequest('/search-history?category=report').items.length, 0);
-assert.equal(mockRequest('/search-history?category=metric', undefined, 'DELETE').items.length, 0);
+assert.equal(mockRequest('/search-history/clear?category=metric', undefined, 'POST').items.length, 0);
 process.env.NEXT_PUBLIC_PORTAL_MODE = 'api';
 const { request, loadWorkbench, openPlatformEntry } = require('../src/lib/portal-api.ts');
 const calls = [];

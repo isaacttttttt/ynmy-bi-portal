@@ -8,8 +8,7 @@
 
 # testing
 /coverage
-/artifacts/qa/
-/artifacts/releases/
+/artifacts/
 /deploy/conf/portal.env
 /deploy/conf/*.crt
 

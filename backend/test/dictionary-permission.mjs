@@ -33,7 +33,7 @@ try {
   assert.equal(denied.total, 3); assert(denied.items.every(r => r.permission === 'denied'));
   const snapshot = await get('/workbench/snapshot');
   assert.deepEqual(new Set(snapshot.recent.map(r => r.id)), new Set(['test-allowed','test-detail-only']));
-  const write = await app.inject({ method: 'PUT', url: '/portal/api/portal/v1/favorites/test-denied',
+  const write = await app.inject({ method: 'POST', url: '/portal/api/portal/v1/favorites/test-denied',
     headers: { origin: 'https://test.invalid' }, payload: { favorite: true } });
   assert.equal(write.statusCode, 404);
   context = { ...context, ids: new Set(), entries: [] };

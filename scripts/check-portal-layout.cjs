@@ -72,7 +72,7 @@ const fs=require('node:fs/promises');
     await frame.getByRole('link',{name:'报表字典',exact:true}).click();await frame.locator('.dictionary-card').first().waitFor();
     const left=await frame.locator('.filters').boundingBox(),right=await frame.locator('.dictionary-panel').boundingBox();
     assert(Math.abs(left.y+left.height-right.y-right.height)<1,'Fit dictionary bottoms align');
-    const dictionary=frame.getByRole('region',{name:'报表字典列表'});await dictionary.evaluate(el=>{el.scrollTop=el.scrollHeight});assert(await dictionary.evaluate(el=>el.scrollTop>0),'Dictionary overflow remains accessible');
+    const dictionary=frame.getByRole('region',{name:'报表字典列表'});assert(await dictionary.evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Dictionary fits two rows without inner scrolling');
     await page.screenshot({path:'artifacts/qa/restored-dictionary-fit.png'});
     await frame.getByRole('link',{name:'返回首页',exact:true}).click();await frame.locator('.workbench-card').first().waitFor();
     await frame.getByRole('button',{name:'当前布局',exact:true}).click();await settle();

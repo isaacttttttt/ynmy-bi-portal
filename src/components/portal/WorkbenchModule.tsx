@@ -25,8 +25,8 @@ export default function WorkbenchModule() {
       <div className="segmented" role="group" aria-label="工作台分类">{([['recent', '最近打开'], ['frequent', '我常用的'], ['favorites', '我收藏的']] as const).map(([key, label]) =>
         <button key={key} aria-pressed={tab === key} className={tab === key ? 'active' : ''} onClick={() => { setPreviewId(null); setTab(key); }}>{label}</button>)}</div>
     </div>
-    <p className="section-note">{tab === 'frequent' ? '按近30天访问次数排序' : tab === 'favorites' ? '收藏与帆软平台同步' : '按最近访问日期排序'}<span>数据截至 {bootstrap.dataAsOf}</span></p>
-    <ScrollArea key={tab} label="工作台报表列表">{reports?.length ? <div className="workbench-grid">{reports.map(report => {
+    <p className="section-note">{tab === 'frequent' ? '按近30天访问次数排序' : tab === 'favorites' ? '收藏与帆软平台同步' : '按最近访问日期排序'}{bootstrap.dataAsOf && <span>数据截至 {bootstrap.dataAsOf}</span>}</p>
+    <ScrollArea key={tab} label="工作台报表列表">{reports?.length ? <div className={`workbench-grid${tab === 'favorites' ? '' : ' workbench-top-eight'}`}>{reports.map(report => {
       const tooltipId = `workbench-preview-${encodeURIComponent(report.id)}`;
       return <Tooltip key={report.id} id={tooltipId} placement="bottomLeft" trigger={['hover', 'focus']} mouseEnterDelay={0.25} mouseLeaveDelay={0.1} color="#1b2c38" classNames={{ root: 'workbench-tooltip' }} destroyOnHidden
         open={previewId === report.id} onOpenChange={visible => {

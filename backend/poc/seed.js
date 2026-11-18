@@ -1,5 +1,4 @@
 import pg from 'pg';
-import mysql from 'mysql2/promise';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { createPool } from '../src/config/database.js';
@@ -13,8 +12,6 @@ for (const key of ['PGHOST','PGUSER','PGPASSWORD','PGDATABASE','PORTAL_DB_PASSWO
 const db = new pg.Client({ connectionTimeoutMillis: 10000, statement_timeout: 30000 });
 const business = ['portal_data_batch','icon_repository','report_metadata','dim_bi_visit_log','fr_index_noticement','fr_quick_entry_app'];
 const platform = ['poc_users','poc_entries','poc_permissions','poc_favorites','poc_sessions','poc_faults'];
-const tables = [...business, ...platform, 'portal_search_history'];
-let source;
 await db.connect();
 try {
   await db.query("SET TIME ZONE 'UTC'");
@@ -23,37 +20,8 @@ try {
   for (const file of ['001-portal.sql','002-platform-poc.sql','003-search-history.sql']) {
     await db.query(await readFile(new URL(`../sql/${file}`, import.meta.url), 'utf8'));
   }
-  await db.query('CREATE TABLE IF NOT EXISTS portal_migration_log (version TEXT PRIMARY KEY, migrated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, row_counts JSONB NOT NULL)');
-  const done = await db.query("SELECT version FROM portal_migration_log WHERE version='mysql-to-pg-v1'");
-  if (!done.rowCount) {
-    source = await mysql.createConnection({ host: process.env.MYSQLHOST, port: Number(process.env.MYSQLPORT || 3306), user: process.env.MYSQLUSER,
-      password: process.env.MYSQLPASSWORD, database: process.env.MYSQLDATABASE, dateStrings: true, supportBigNumbers: true, bigNumberStrings: true, connectTimeout: 10000 });
-    await source.query('SET TRANSACTION READ ONLY');
-    await source.query('START TRANSACTION WITH CONSISTENT SNAPSHOT');
-    const counts = {};
-    for (const table of tables) {
-      assert.equal((await db.query(`SELECT COUNT(*) FROM ${table}`)).rows[0].count, '0', `Refusing to overwrite nonempty PostgreSQL table: ${table}`);
-      const [rows] = await source.query(`SELECT * FROM ${table}`);
-      const columns = (await db.query('SELECT column_name, data_type FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position', ['public', table])).rows;
-      for (const row of rows) {
-        const fields = columns.filter(c => Object.hasOwn(row, c.column_name));
-        const values = fields.map(c => {
-          const value = row[c.column_name];
-          if (c.data_type === 'jsonb') return typeof value === 'string' ? value : JSON.stringify(value);
-          if (c.data_type === 'timestamp with time zone' && value) return value.replace(' ', 'T') + 'Z';
-          return value;
-        });
-        await db.query(`INSERT INTO ${table} (${fields.map(c => '"'+c.column_name+'"').join(',')}) VALUES (${values.map((_, i) => '$'+(i+1)).join(',')})`, values);
-      }
-      counts[table] = rows.length;
-      assert.equal(Number((await db.query(`SELECT COUNT(*) FROM ${table}`)).rows[0].count), rows.length);
-    }
-    assert.equal((await db.query('SELECT COUNT(*) FROM portal_data_batch WHERE batch_id=1')).rows[0].count, '1', 'Source data batch must be ready');
-    await db.query("SELECT setval(pg_get_serial_sequence('fr_quick_entry_app','app_id'), COALESCE(MAX(app_id),1), COUNT(*)>0) FROM fr_quick_entry_app");
-    await db.query("INSERT INTO portal_migration_log VALUES ('mysql-to-pg-v1',CURRENT_TIMESTAMP,$1)", [JSON.stringify(counts)]);
-    await source.rollback();
-    console.log('Migrated existing test data from MySQL to PostgreSQL; verified row counts:', JSON.stringify(counts));
-  } else console.log('PostgreSQL migration already complete; existing data preserved.');
+  const batch = await db.query('SELECT 1 FROM portal_data_batch WHERE batch_id=1');
+  if (!batch.rowCount) throw new Error('Restore a PostgreSQL demo dataset before running pre-deploy');
   for (const [role, password] of [['portal_reader',process.env.PORTAL_DB_PASSWORD],['portal_platform',process.env.PLATFORM_DB_PASSWORD]]) {
     const exists = await db.query('SELECT 1 FROM pg_roles WHERE rolname=$1',[role]);
     if (!exists.rowCount) await db.query(`CREATE ROLE ${role} LOGIN`);
@@ -91,6 +59,6 @@ try {
   console.log('Verified PostgreSQL business read-only access, session isolation, history CRUD/index and inclusive notice dates.');
 } catch (error) {
   await db.query('ROLLBACK');
-  console.error('PostgreSQL migration failed:', error.code || error.name);
+  console.error('PostgreSQL pre-deploy failed:', error.code || error.message);
   process.exitCode = 1;
-} finally { if(source) await source.end(); await db.end(); }
+} finally { await db.end(); }

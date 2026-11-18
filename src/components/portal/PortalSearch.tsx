@@ -5,7 +5,7 @@ import { AppWindow, History, Search, Tag, Hash, X } from 'lucide-react';
 import { message } from 'antd';
 import { request } from '@/lib/portal-api';
 import { searchCategories, searchLabels, searchCatalog, type SearchCategory, type SearchHistory, type SearchItem, type SearchResult } from '@/lib/portal-model';
-import { usePortal } from './PortalProvider';
+import { RequestState, usePortal } from './PortalProvider';
 import ScrollArea from './ScrollArea';
 
 export default function PortalSearch({ query, category: selectedCategory = 'all', onSearch }: { query: string; category?: SearchCategory; onSearch: (q: string, category: SearchCategory) => void }) {
@@ -66,7 +66,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'all'
   }
   async function clearHistory() {
     setClearing(true);
-    try { setHistory(await request<SearchHistory>(`/search-history?category=${category}`, AbortSignal.timeout(8000), undefined, 'DELETE')); }
+    try { setHistory(await request<SearchHistory>(`/search-history/clear?category=${category}`, AbortSignal.timeout(8000), undefined, 'POST')); }
     catch (error) { toast.error((error as Error).message); }
     finally { setClearing(false); }
   }
@@ -92,7 +92,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'all'
       <div id="portal-search-results" role="listbox" aria-label={`${searchLabels[category]}搜索结果`} aria-busy={loading}>
         {items.map((item, index) => { const ResultIcon = resultIcons[item.category]; return <button type="button" role="option" id={`portal-search-option-${index}`} aria-selected={active === index} className="search-result-row" key={`${item.category}:${item.report?.id || item.value}`} onClick={() => choose(item)}><span className="search-result-icon"><ResultIcon size={21} /></span><span className="search-result-copy"><strong>{item.value}</strong><small>{item.subtitle}</small></span><span className="search-result-badge">{searchLabels[item.category]}</span></button>; })}
       </div>
-      {loading ? <p className="search-empty" role="status">正在加载…</p> : error ? <div className="search-empty" role="alert">{error}<button className="text-button" onClick={() => { setAttempt(n => n + 1); if (!q) workbench.retry(); }}>重试</button></div> : !items.length && <p className="search-empty">{q ? '没有匹配结果，请换个关键词' : '暂无最近打开的报表'}</p>}
+      {loading ? <RequestState loading /> : error ? <div className="search-empty" role="alert">{error}<button className="text-button" onClick={() => { setAttempt(n => n + 1); if (!q) workbench.retry(); }}>重试</button></div> : !items.length && <p className="search-empty">{q ? '没有匹配结果，请换个关键词' : '暂无最近打开的报表'}</p>}
       {q && !!data?.total && <button type="button" className="search-all" onClick={() => submit()}>查看全部相关报表</button>}
     </div></ScrollArea>
   </div>, document.body)}</>;

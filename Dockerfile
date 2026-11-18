@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS frontend
+FROM node:24.22.3-bookworm-slim AS frontend
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -8,7 +8,7 @@ COPY public ./public
 ENV NEXT_TELEMETRY_DISABLED=1 NEXT_PUBLIC_PORTAL_MODE=api
 RUN npm run build
 
-FROM node:24-bookworm-slim
+FROM node:24.22.3-bookworm-slim
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force

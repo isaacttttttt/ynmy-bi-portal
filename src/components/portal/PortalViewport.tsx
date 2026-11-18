@@ -15,14 +15,14 @@ const designWidth = 1920;
 const DisplayContext = createContext<{ mode: DisplayMode; choose: (mode: DisplayMode) => void } | null>(null);
 
 export default function PortalViewport({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<DisplayMode>('current');
+  const [mode, setMode] = useState<DisplayMode>('fit');
   const viewport = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLDivElement>(null);
   const transition = useRef<ViewTransition | null>(null);
   const [size, setSize] = useState({ width: designWidth, height: 1080, contentHeight: 1080 });
-  useEffect(() => {
+  useLayoutEffect(() => {
     try {
-      const saved = localStorage.getItem(storageKey);
+      const saved = window.top!.localStorage.getItem(storageKey);
       if (modes.some(item => item.id === saved)) setMode(saved as DisplayMode);
     } catch { /* Embedded browsers may disable storage; the current page still works. */ }
   }, []);
@@ -49,7 +49,7 @@ export default function PortalViewport({ children }: { children: ReactNode }) {
       void active.ready.catch(() => { /* A newer selection may skip this animation. */ });
       void active.finished.then(() => { if (transition.current === active) transition.current = null; });
     } else update();
-    try { localStorage.setItem(storageKey, next); } catch { /* Keep the selection for this page. */ }
+    try { window.top!.localStorage.setItem(storageKey, next); } catch { /* Keep the selection for this page. */ }
   }
   const scaled = mode !== 'current';
   const scale = Math.max(1280, size.width) / designWidth;

@@ -65,7 +65,7 @@ try {
   const snapshot = await get('/workbench/snapshot');
   assert(snapshot.recent.length > 0);
   const secret = 'DO-NOT-LOG-CREDENTIAL';
-  const invalid = await app.inject({ method: 'PUT', url: '/portal/api/portal/v1/search-history?token=' + secret,
+  const invalid = await app.inject({ method: 'POST', url: '/portal/api/portal/v1/search-history?token=' + secret,
     headers, payload: { category: 'all', query: 'test', password: secret, nested: { authorization: secret } } });
   assert.equal(invalid.statusCode, 400);
   const malformed = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: {

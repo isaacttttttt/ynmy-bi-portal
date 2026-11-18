@@ -46,7 +46,7 @@ export function ReportDetails({ report, onClose }: { report: Report | null; onCl
         ['报表 Owner', [shown.owner, shown.department && `（${shown.department}）`].filter(Boolean).join(' ')],
         ['开发负责人', [shown.developer, shown.developerDepartment && `（${shown.developerDepartment}）`].filter(Boolean).join(' ')],
         ['上线时间', shown.onlineOn], ['最近更新时间', [shown.updatedOn, shown.updateNote].filter(Boolean).join(' · ')],
-      ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{text(value)}</dd></div>)}<div><dt>累计访问量</dt><dd className="visit-count">{shown.views.toLocaleString('zh-CN')} 次</dd></div></dl></section>
+      ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{text(value)}</dd></div>)}<div><dt>累计访问量</dt><dd className="visit-count">{shown.views === null ? '暂不可用' : `${shown.views.toLocaleString('zh-CN')} 次`}</dd></div></dl></section>
     </ScrollArea>}
   </Drawer>;
 }

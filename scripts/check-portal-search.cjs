@@ -15,7 +15,7 @@ const fs = require('node:fs/promises');
   }
   await api('/poc/login','POST',{user:'admin',accessKey});
   const snapshots={};for(const category of ['all','report','tag','metric']) snapshots[category]=await api('/portal/api/portal/v1/search-history?category='+category);
-  const writes=[];page.on('request',r=>{if(r.method()==='PUT' && r.url().includes('/search-history'))writes.push(r.postDataJSON());});
+  const writes=[];page.on('request',r=>{if(r.method()==='POST' && r.url().includes('/search-history'))writes.push(r.postDataJSON());});
   const search=page.getByRole('combobox',{name:'搜索报表'});
   try {
     await page.goto(base+'/portal/');await page.locator('.workbench-card').first().waitFor();
@@ -71,8 +71,8 @@ const fs = require('node:fs/promises');
     console.log('PASS: coach marks, mode collapse/persistence, adaptive viewport layout, dropdown alignment, categories, keyboard, history save/clear/reload and platform preview.');
   } finally {
     for(const category of ['all','report','tag','metric']) {
-      await api('/portal/api/portal/v1/search-history?category='+category,'DELETE');
-      for(const item of snapshots[category].items.toReversed())await api('/portal/api/portal/v1/search-history','PUT',{category,query:item.query});
+      await api('/portal/api/portal/v1/search-history/clear?category='+category,'POST');
+      for(const item of snapshots[category].items.toReversed())await api('/portal/api/portal/v1/search-history','POST',{category,query:item.query});
     }
     await api('/poc/logout','POST',{});await browser.close();
   }

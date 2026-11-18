@@ -12,7 +12,7 @@ function readFavorites() {
   } catch { /* Storage may be unavailable in an embedded browser; keep this session's state. */ }
   return favorites;
 }
-export function mockRequest(path: string, body?: unknown, method = body === undefined ? 'GET' : 'PUT'): unknown {
+export function mockRequest(path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): unknown {
   const url = new URL(path, 'https://demo.invalid'); const params = url.searchParams;
   const page = Math.max(1, Number(params.get('page')) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(params.get('pageSize')) || 8));
@@ -25,12 +25,12 @@ export function mockRequest(path: string, body?: unknown, method = body === unde
     return queryReports(sorted, { q: params.get('q') || '', category: (params.get('category') || 'all') as SearchCategory, filters, page, pageSize });
   }
   if (url.pathname === '/search') return searchCatalog(reports, (params.get('category') || 'all') as SearchCategory, params.get('q') || '');
-  if (url.pathname === '/search-history') {
+  if (['/search-history', '/search-history/clear'].includes(url.pathname)) {
     const key = 'ynby.portal.demo.search-history.v1';
     try { history = JSON.parse(localStorage.getItem(key) || '{}'); } catch { /* Session-only demo. */ }
     const input = body as { category: SearchCategory; query: string } | undefined;
     const category = input?.category || (params.get('category') || 'all') as SearchCategory;
-    if (method === 'DELETE') history[category] = [];
+    if (method === 'POST' && url.pathname === '/search-history/clear') history[category] = [];
     if (input) {
       const query = input.query.trim().replace(/\s+/g, ' ');
       history[category] = [{ query, searchedAt: new Date().toISOString() }, ...(history[category] || []).filter(item => item.query.toLocaleLowerCase() !== query.toLocaleLowerCase())].slice(0, 20);
@@ -43,7 +43,7 @@ export function mockRequest(path: string, body?: unknown, method = body === unde
     const list = reports.filter(r => r.status === 'active' && (tab === 'favorites' ? readFavorites().includes(r.id) : tab === 'recent' ? r.lastVisitedOn : r.visits30d > 0));
     if (tab === 'recent') list.sort((a, b) => (b.lastVisitedOn || '').localeCompare(a.lastVisitedOn || ''));
     if (tab === 'frequent') list.sort((a, b) => b.visits30d - a.visits30d || a.id.localeCompare(b.id));
-    return paginate(list, page, pageSize);
+    return paginate(tab === 'favorites' ? list : list.slice(0, 8), page, pageSize);
   }
   if (url.pathname === '/notices') return paginate(notices, page, pageSize);
   if (url.pathname.startsWith('/favorites/')) {
