@@ -36,6 +36,7 @@ tail -f logs/portal.log
 |---|---|
 | `PUBLIC_ORIGIN` | 浏览器访问平台的源，例如 `https://bi.customer.example`；不带路径 |
 | `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD` | 容器可访问的 PostgreSQL 地址与账号；不要把宿主机数据库写成容器内的 localhost |
+| `DB_STATEMENT_TIMEOUT_MS` | PostgreSQL 单条读写 SQL 的超时，默认 `60000` 毫秒，驱动多留 5 秒接收数据库响应 |
 | `FINE_BASE_URL` | 后端请求帆软的平台根地址，例如 `http://finebi.internal:8080/WebReport/ReportServer` |
 | `FINE_IDENTITY_MODE` | 交付配置为 `trusted-cookie`，按客户主平台校验后的 Cookie 映射身份；也保留 `session` 模式 |
 | `FINE_USER_COOKIE_NAME` | 默认 `fine_login_users`，其值对应 `dim_bi_user.id` |
@@ -139,6 +140,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.portal_search_history TO portal_r
 ```
 
 需要 TLS 时配置 `DB_SSL_MODE=verify-full`；自签或企业 CA 可放在 `conf/ca.crt`，设置 `DB_SSL_CA_FILE=/app/config/ca.crt`。默认 `disable` 仅适用于客户允许的内网非 TLS 连接。
+
+单条 SQL 的时间与整条 HTTP 请求的时间分别计算。Nginx 和企业网关的响应超时需覆盖接口内各步骤的总耗时。对于默认 60 秒的单条 SQL，可用 `proxy_read_timeout 75s` 起步，保存搜索历史等包含多条语句的接口按实际耗时留出余量。
 
 ## 5. 验收与回退
 

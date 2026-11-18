@@ -28,10 +28,16 @@ export async function reportsFor(db, context) {
 }
 export async function noticesFor(db, context) {
   const today = businessDate();
-  const { rows } = await db.query( `SELECT * FROM fr_index_noticement WHERE notice_start_day_id <= $1::date
+  const { rows } = await db.query(`SELECT notice_uuid, notice_title, notice_category, notice_is_top, notice_register_day_id,
+    notice_content, notice_is_hyperlink, notice_hyperlink
+    FROM fr_index_noticement WHERE notice_start_day_id <= $1::date
     AND (notice_last_day_id IS NULL OR notice_last_day_id >= $1::date)
-    ORDER BY notice_is_top DESC, notice_register_day_id DESC, notice_uuid`, [today]);
-  return rows.filter(r => (r.notice_region_id || '').split(',').some(id => context.ids.has(id.trim()))).map(r => ({
+    AND EXISTS (
+      SELECT 1 FROM unnest(string_to_array(notice_region_id, ',')) AS scope(entry_id)
+      WHERE regexp_replace(scope.entry_id, '^[[:space:]]+|[[:space:]]+$', '', 'g') = ANY($2::text[])
+    )
+    ORDER BY notice_is_top DESC, notice_register_day_id DESC, notice_uuid`, [today, [...context.ids]]);
+  return rows.map(r => ({
     id: r.notice_uuid, title: r.notice_title, category: r.notice_category || '', pinned: r.notice_is_top === 1,
     publishedOn: r.notice_register_day_id, content: r.notice_content || '',
     ...(r.notice_is_hyperlink && publicUrl(r.notice_hyperlink) ? { url: r.notice_hyperlink } : {}),

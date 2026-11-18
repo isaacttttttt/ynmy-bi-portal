@@ -57,7 +57,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'all'
   useEffect(() => { if (active >= 0) document.getElementById(`portal-search-option-${active}`)?.scrollIntoView({ block: 'nearest' }); }, [active]);
   function remember(value: string) {
     if (!value.trim()) return;
-    void request<SearchHistory>('/search-history', AbortSignal.timeout(8000), { category, query: value }).catch(() => toast.error('本次搜索记录未保存，请稍后重试'));
+    void request<SearchHistory>('/search-history', undefined, { category, query: value }).catch(() => toast.error('本次搜索记录未保存，请稍后重试'));
   }
   function submit(value = q) { remember(value); setOpen(false); onSearch(value, category); }
   function choose(item: SearchItem) {
@@ -66,7 +66,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'all'
   }
   async function clearHistory() {
     setClearing(true);
-    try { setHistory(await request<SearchHistory>(`/search-history/clear?category=${category}`, AbortSignal.timeout(8000), undefined, 'POST')); }
+    try { setHistory(await request<SearchHistory>(`/search-history/clear?category=${category}`, undefined, undefined, 'POST')); }
     catch (error) { toast.error((error as Error).message); }
     finally { setClearing(false); }
   }

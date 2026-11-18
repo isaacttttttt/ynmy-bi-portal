@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { buildApp } from '../src/app.js';
+import { noticesFor as demoNoticesFor } from '../src/repository.js';
 
 assert(process.env.SOURCE_TEST_DATABASE_URL, 'Provide an isolated test database');
 const db = new pg.Client({ connectionString: process.env.SOURCE_TEST_DATABASE_URL, ssl: { rejectUnauthorized: false } });
@@ -14,6 +15,16 @@ const origin = 'http://127.0.0.1:3194';
 let app;
 try {
   await db.connect();
+  await db.query(`CREATE TEMP TABLE fr_index_noticement(notice_uuid text, notice_title text, notice_category text,
+    notice_is_top smallint, notice_register_day_id date, notice_content text, notice_is_hyperlink smallint,
+    notice_hyperlink text, notice_start_day_id date, notice_last_day_id date, notice_region_id text);
+    INSERT INTO fr_index_noticement(notice_uuid,notice_is_top,notice_register_day_id,notice_start_day_id,notice_last_day_id,notice_region_id) VALUES
+      ('allowed',0,'2020-01-01','2020-01-01',NULL,'other,' || chr(9) || 'team ,team'),
+      ('longer-id',1,'2020-01-01','2020-01-01',NULL,'team-other'),
+      ('no-scope',1,'2020-01-01','2020-01-01',NULL,NULL),
+      ('expired',1,'2020-01-01','2020-01-01','2020-01-02','team')`);
+  assert.deepEqual((await demoNoticesFor(db, { ids: new Set(['team']) })).map(n => n.id), ['allowed']);
+  assert.deepEqual(await demoNoticesFor(db, { ids: new Set() }), []);
   // Session-local tables shadow business tables; customer imports never replace public data.
   if (process.env.SOURCE_TEST_DICTIONARY_SQL) {
     const sql = await readFile(process.env.SOURCE_TEST_DICTIONARY_SQL, 'utf8');
