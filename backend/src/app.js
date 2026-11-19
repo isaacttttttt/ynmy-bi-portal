@@ -7,9 +7,10 @@ import { fileURLToPath } from 'node:url';
 import portalConfig from '../../src/config/portal.json' with { type: 'json' };
 import { createPool } from './config/database.js';
 import { platformClient } from './platform.js';
-import { ApiError, invalid, pageQuery, requireOrigin, searchQuery } from './http.js';
+import { ApiError, invalid, pageQuery, requireOrigin, roleListQuery, searchQuery } from './http.js';
 import * as sourceRepository from './source-repository.js';
 import { searchHistory, saveSearch } from './repository.js';
+import { roleSummaryCounts, roleThematicDetail, saveRoleThematicTree, thematicRolesFor } from './role-thematic-repository.js';
 import { queryReports, paginate, descendants, searchCatalog, searchCategories } from '../../src/lib/portal-model.ts';
 
 const { basePath } = portalConfig;
@@ -17,13 +18,12 @@ const { basePath } = portalConfig;
 export async function buildApp({ platform, db = createPool() } = {}) {
   platform ||= platformClient(process.env, db);
   const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
-  const rootId = process.env.FINE_ROOT_ID;
-  if (!rootId) throw new Error('Missing FINE_ROOT_ID');
+  const rootId = process.env.FINE_ROOT_ID || '';
   const { reportsFor, noticesFor, quickEntries, bootstrapDate } = sourceRepository;
   const stream = logStream(process.env.PORTAL_LOG_FILE);
   const app = Fastify({ logger: { level: 'info', stream, redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers.set-cookie'] },
     disableRequestLogging: true, genReqId: () => randomUUID(), requestIdHeader: false,
-    bodyLimit: 16384, requestTimeout: 15000, ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
+    bodyLimit: 524288, requestTimeout: 15000, ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
   app.addHook('onClose', () => db.end());
   app.addHook('onClose', async () => { platform.close?.(); });
   if (stream) app.addHook('onClose', async () => { stream.end(); await finished(stream); });
@@ -63,11 +63,11 @@ export async function buildApp({ platform, db = createPool() } = {}) {
     api.get('/bootstrap', async request => {
       if (Object.keys(request.query).length) throw invalid();
       const context = request.portal;
-      const [favoriteIds, links, asOf] = await Promise.all([
-        platform.favorites(context), quickEntries(db), bootstrapDate(db, request.log),
+      const [favoriteIds, links, asOf, thematicRoles] = await Promise.all([
+        platform.favorites(context), quickEntries(db), bootstrapDate(db, request.log), thematicRolesFor(db, context),
       ]);
-      const tree = context.ids.has(rootId) ? context.entries.filter(e => e.id === rootId).concat(descendants(context.entries, rootId)) : [];
-      return { success: true, data: { user: { name: context.user.name }, rootId, entries: tree, favoriteIds, quickEntries: links, dataAsOf: asOf, platform: platform.browser } };
+      const tree = rootId && context.ids.has(rootId) ? context.entries.filter(e => e.id === rootId).concat(descendants(context.entries, rootId)) : [];
+      return { success: true, data: { user: { name: context.user.name }, rootId, entries: tree, thematicRoles, favoriteIds, quickEntries: links, dataAsOf: asOf, platform: platform.browser } };
     });
     api.get('/reports', async request => {
       const query = pageQuery(request.query, { reports: true });
@@ -117,6 +117,74 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       const favorites = await platform.favorites(context);
       if (favorites.includes(id) !== request.body.favorite) await platform.favorite(context, id, request.body.favorite);
       return { success: true, data: { id, favorite: request.body.favorite, report } };
+    });
+    api.get('/role-thematic/roles', async request => {
+      const { page, pageSize, q } = roleListQuery(request.query);
+      if (typeof platform.roles !== 'function') throw new ApiError(501, 'NOT_SUPPORTED', '当前平台客户端未启用角色查询');
+      const result = await platform.roles(request.portal, { page, count: pageSize, keyword: q });
+      const counts = await roleSummaryCounts(db, result.items.map(item => item.id));
+      return {
+        success: true,
+        data: {
+          ...result,
+          items: result.items.map(item => ({
+            ...item,
+            configured: counts.has(item.id),
+            enabledReportCount: counts.get(item.id)?.enabledReportCount ?? 0,
+            totalReportCount: counts.get(item.id)?.totalReportCount ?? 0,
+          })),
+        },
+      };
+    });
+    api.get('/role-thematic/roles/:roleId', async request => {
+      if (Object.keys(request.query).some(key => key !== 'roleName')) throw invalid();
+      const roleNameHint = request.query.roleName ?? '';
+      if (typeof roleNameHint !== 'string' || roleNameHint.length > 256) throw invalid();
+      if (typeof platform.verifyRoleAccess !== 'function') throw new ApiError(501, 'NOT_SUPPORTED', '当前平台客户端未启用角色校验');
+      const verifiedRole = await platform.verifyRoleAccess(request.portal, request.params.roleId, roleNameHint.trim());
+      return { success: true, data: await roleThematicDetail(db, verifiedRole) };
+    });
+    api.post('/role-thematic/roles/:roleId/tree', {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['nodes'],
+          additionalProperties: false,
+          properties: {
+            roleName: { type: 'string', maxLength: 256 },
+            nodes: {
+              type: 'array',
+              maxItems: 2000,
+              items: {
+                type: 'object',
+                required: ['id', 'parentId', 'nodeType', 'reportId', 'name', 'sort', 'enabled'],
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'string', minLength: 1, maxLength: 128 },
+                  parentId: { type: ['string', 'null'], maxLength: 128 },
+                  nodeType: { type: 'string', enum: ['folder', 'report'] },
+                  reportId: { type: ['string', 'null'], maxLength: 128 },
+                  name: { type: 'string', minLength: 1, maxLength: 256 },
+                  sort: { type: 'integer', minimum: 0, maximum: 100000 },
+                  enabled: { type: 'boolean' },
+                },
+              },
+            },
+          },
+        },
+      },
+    }, async request => {
+      if (Object.keys(request.query).length) throw invalid();
+      if (typeof platform.verifyRoleAccess !== 'function') throw new ApiError(501, 'NOT_SUPPORTED', '当前平台客户端未启用角色校验');
+      const verifiedRole = await platform.verifyRoleAccess(request.portal, request.params.roleId, (request.body.roleName || '').trim());
+      return {
+        success: true,
+        data: await saveRoleThematicTree(db, {
+          role: verifiedRole,
+          userName: request.portal.user.userName,
+          nodes: request.body.nodes,
+        }),
+      };
     });
   }, { prefix: `${basePath}/api/portal/v1` });
   app.get(basePath, (request, reply) => reply.redirect(`${basePath}/${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, 308));

@@ -39,6 +39,20 @@ export function searchQuery(query, withText = false) {
   if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 200)) throw invalid();
   return { category: searchCategory(query.category), q: (query.q || '').trim() };
 }
+export function roleListQuery(query) {
+  if (Object.keys(query).some(key => !['page', 'pageSize', 'q'].includes(key))) throw invalid();
+  const positive = (value, fallback, max) => {
+    if (value === undefined) return fallback;
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > max) throw invalid();
+    return Number(value);
+  };
+  if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 200)) throw invalid();
+  return {
+    page: positive(query.page, 1, 10000),
+    pageSize: positive(query.pageSize, 15, 50),
+    q: (query.q || '').trim(),
+  };
+}
 export function requireOrigin(request, origin) {
   if (request.headers.origin !== origin || request.headers['sec-fetch-site'] === 'cross-site') throw new ApiError(403, 'INVALID_ORIGIN', '请求来源不允许');
 }

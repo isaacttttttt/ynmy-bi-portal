@@ -18,10 +18,13 @@ export function platformClient(env = process.env, db) {
     favorites: env.FINE_FAVORITES_PATH || '/v10/favorite/entry/list',
     add: env.FINE_FAVORITE_ADD_PATH || '/v10/favorite/entry/{entryId}',
     remove: env.FINE_FAVORITE_REMOVE_PATH || '/v10/favorite/entry/{entryId}?fakeMethod=DELETE',
+    roles: env.FINE_ROLES_PATH || '/v10/roles',
   };
   for (const [name, path] of Object.entries(paths)) {
     if (!path.startsWith('/') && !/^https?:\/\//.test(path) || path.startsWith('//') || !publicUrl(path)) throw new Error(`Invalid platform endpoint: ${name}`);
   }
+  const rolesPrivilegeType = String(env.FINE_ROLES_PRIVILEGE_TYPE ?? '2');
+  if (!/^\d{1,10}$/.test(rolesPrivilegeType)) throw new Error('Invalid FINE_ROLES_PRIVILEGE_TYPE');
   for (const name of ['add', 'remove']) if (!paths[name].includes('{entryId}')) throw new Error(`Platform ${name} path requires {entryId}`);
   const addMethod = env.FINE_FAVORITE_ADD_METHOD || 'POST', removeMethod = env.FINE_FAVORITE_REMOVE_METHOD || 'POST';
   if (![addMethod, removeMethod].every(method => ['POST', 'PUT', 'DELETE'].includes(method))) throw new Error('Invalid favorite HTTP method');
@@ -41,7 +44,7 @@ export function platformClient(env = process.env, db) {
       !Number.isSafeInteger(maxEntries) || maxEntries < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1) {
     throw new Error('Invalid tree cache limits');
   }
-  const trees = new Map(), pendingTrees = new Map();
+  const trees = new Map(), pendingTrees = new Map(), roleCaches = new Map();
   let cachedBytes = 0;
   async function call(token, path, method = 'GET', log, operation) {
     const started = Date.now();
@@ -117,8 +120,50 @@ export function platformClient(env = process.env, db) {
     pendingTrees.set(key, pending);
     return pending;
   }
+  function removeRoleCache(key) {
+    const entry = roleCaches.get(key);
+    if (!entry) return;
+    clearTimeout(entry.timer); roleCaches.delete(key);
+  }
+  function rememberRoles(token, items) {
+    if (!ttlMs || !items.length) return;
+    const key = createHash('sha256').update(token).digest('hex');
+    const now = Date.now();
+    let entry = roleCaches.get(key);
+    if (!entry || entry.expiresAt <= now) {
+      removeRoleCache(key);
+      if (roleCaches.size >= 1000) removeRoleCache(roleCaches.keys().next().value);
+      const timer = setTimeout(removeRoleCache, ttlMs, key); timer.unref();
+      entry = { map: new Map(), expiresAt: now + ttlMs, timer };
+      roleCaches.set(key, entry);
+    }
+    for (const role of items) entry.map.set(role.id, role);
+  }
+  function cachedRole(token, roleId) {
+    const key = createHash('sha256').update(token).digest('hex');
+    const entry = roleCaches.get(key);
+    if (!entry || entry.expiresAt <= Date.now()) { removeRoleCache(key); return null; }
+    return entry.map.get(roleId) || null;
+  }
+  async function fetchRoles(token, { page = 1, count = 15, keyword = '' } = {}, log) {
+    const sep = paths.roles.includes('?') ? '&' : '?';
+    const qs = `page=${page}&keyword=${encodeURIComponent(keyword)}&count=${count}&privilegeType=${rolesPrivilegeType}&_=${Date.now()}`;
+    const data = await call(token, `${paths.roles}${sep}${qs}`, 'GET', log, 'roles');
+    if (!data || !Array.isArray(data.items) || data.items.length > 500) throw upstreamError();
+    const items = data.items.map(row => {
+      if (!row || !validId(row.id) || typeof row.text !== 'string') throw upstreamError();
+      return { id: row.id, name: row.text, description: typeof row.description === 'string' ? row.description : '' };
+    });
+    rememberRoles(token, items);
+    return {
+      page: Number.isInteger(data.page) && data.page > 0 ? data.page : page,
+      pageSize: count,
+      hasNext: Boolean(data.hasNext),
+      items,
+    };
+  }
   return {
-    close() { for (const key of trees.keys()) removeTree(key); },
+    close() { for (const key of trees.keys()) removeTree(key); for (const key of roleCaches.keys()) removeRoleCache(key); },
     browser: { entryAccessUrl, biServiceName: env.FINE_BI_SERVICE_NAME || 'dec.service.frame.tab_pane', biTabType: env.FINE_BI_TAB_TYPE || 'bi.subject.publink' },
     async context(request) {
       const log = request.log?.child({ requestId: request.id });
@@ -130,7 +175,7 @@ export function platformClient(env = process.env, db) {
       const { entries, ids } = await permissionTree(token, log);
       if (identityMode === 'trusted-cookie') {
         // The trusted gateway must validate both cookies and their user binding before proxying here.
-        const { rows: users } = await db.query(`SELECT username AS "userName", coalesce(nullif(realname,''),username) AS name
+        const { rows: users } = await db.query(`SELECT DISTINCT username AS "userName", coalesce(nullif(realname,''),username) AS name
           FROM dim_bi_user WHERE id=ANY($1::text[]) AND enable='true'
             AND ($2::text IS NULL OR username=$2) LIMIT 2`, [identity.ids, identity.username]);
         log?.info({ stage: 'identity', matchedUsers: users.length, username: users.length === 1 ? users[0].userName : undefined }, 'identity lookup');
@@ -147,6 +192,26 @@ export function platformClient(env = process.env, db) {
     },
     async favorite(context, id, value) {
       if (await call(context.token, (value ? paths.add : paths.remove).replaceAll('{entryId}', encodeURIComponent(id)), value ? addMethod : removeMethod, context.log, value ? 'favorite-add' : 'favorite-remove') !== 'success') throw upstreamError();
+    },
+    async roles(context, options) {
+      return fetchRoles(context.token, options, context.log);
+    },
+    async verifyRoleAccess(context, roleId, roleNameHint = '') {
+      if (!validId(roleId)) throw new ApiError(400, 'INVALID_REQUEST', '角色 ID 不合法');
+      const hit = cachedRole(context.token, roleId);
+      if (hit) return hit;
+      if (roleNameHint) {
+        const searched = await fetchRoles(context.token, { page: 1, count: 50, keyword: roleNameHint }, context.log);
+        const found = searched.items.find(item => item.id === roleId);
+        if (found) return found;
+      }
+      for (let page = 1; page <= 20; page++) {
+        const listed = await fetchRoles(context.token, { page, count: 50, keyword: '' }, context.log);
+        const found = listed.items.find(item => item.id === roleId);
+        if (found) return found;
+        if (!listed.hasNext) break;
+      }
+      throw new ApiError(403, 'FORBIDDEN', '当前账号没有该角色的配置权限');
     },
   };
 }

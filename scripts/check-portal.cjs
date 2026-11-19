@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const ts = require('typescript');
 require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText, filename);
-const { emptyFilters, queryReports, volume, descendants, breadcrumb, safeUrl, searchCatalog } = require('../src/lib/portal-model.ts');
+const { emptyFilters, queryReports, volume, descendants, breadcrumb, safeUrl, searchCatalog, validateRoleThematicNodes, folderAccessState, moveRoleThematicNode, isDescendantNode, roleThematicBreadcrumb } = require('../src/lib/portal-model.ts');
 const { reports, bootstrap } = require('./fixtures/portal-fixtures.ts');
 const query = (q = '', filters = emptyFilters(), page = 1) => queryReports(reports, { q, filters, page, pageSize: 6 });
 assert.equal(query(' ROI ').items[0].module, '电商');
@@ -35,6 +35,39 @@ assert.deepEqual(breadcrumb(bootstrap.entries, 'region', 'topics').map(e => e.id
 assert(descendants(bootstrap.entries, 'health').some(e => e.id === 'entry-8'));
 assert(!descendants(bootstrap.entries, 'health').some(e => e.id === 'entry-12'));
 assert.equal(descendants([{ id:'a',parentId:'b' },{ id:'b',parentId:'a' }], 'a').length, 1);
+// Role-thematic tree model checks
+const validTree = validateRoleThematicNodes([
+  { id: 'f1', parentId: null, nodeType: 'folder', reportId: null, name: '一级目录', sort: 2, enabled: true },
+  { id: 'f2', parentId: 'f1', nodeType: 'folder', reportId: null, name: '二级目录', sort: 0, enabled: true },
+  { id: 'r1', parentId: 'f2', nodeType: 'report', reportId: 'rep-1', name: '报表1', sort: 1, enabled: true },
+  { id: 'r2', parentId: 'f2', nodeType: 'report', reportId: 'rep-2', name: '报表2', sort: 0, enabled: false },
+]);
+assert.equal(validTree.ok, true);
+assert.equal(validTree.nodes.find(n => n.id === 'r2').sort, 0);
+assert.equal(validTree.nodes.find(n => n.id === 'r1').sort, 1);
+assert.equal(folderAccessState(validTree.nodes, 'f1'), 'partial');
+assert.equal(folderAccessState(validTree.nodes, 'f2'), 'partial');
+assert.equal(isDescendantNode(validTree.nodes, 'f1', 'r1'), true);
+assert.equal(isDescendantNode(validTree.nodes, 'f2', 'f1'), false);
+const moved = moveRoleThematicNode(validTree.nodes, 'r1', 'f1', 'inside');
+assert.equal(moved.find(n => n.id === 'r1').parentId, 'f1');
+assert.equal(folderAccessState(moved, 'f2'), 'none');
+assert.equal(folderAccessState(moved, 'f1'), 'partial');
+// Prevent dropping folder into its own descendant
+assert.deepEqual(moveRoleThematicNode(validTree.nodes, 'f1', 'f2', 'inside'), validTree.nodes);
+// Reject cycle and duplicate reportId
+assert.equal(validateRoleThematicNodes([
+  { id: 'a', parentId: 'b', nodeType: 'folder', reportId: null, name: 'A', sort: 0, enabled: true },
+  { id: 'b', parentId: 'a', nodeType: 'folder', reportId: null, name: 'B', sort: 0, enabled: true },
+]).ok, false);
+assert.equal(validateRoleThematicNodes([
+  { id: 'n1', parentId: null, nodeType: 'report', reportId: 'dup', name: 'R1', sort: 0, enabled: true },
+  { id: 'n2', parentId: null, nodeType: 'report', reportId: 'dup', name: 'R2', sort: 1, enabled: true },
+]).ok, false);
+assert.deepEqual(roleThematicBreadcrumb([
+  { id: 'f1', parentId: null, name: '一级', type: 'folder', sort: 0 },
+  { id: 'f2', parentId: 'f1', name: '二级', type: 'folder', sort: 0 },
+], 'f2').map(e => e.id), ['f1', 'f2']);
 assert.throws(() => safeUrl('javascript:alert(1)'));
 assert.throws(() => safeUrl('data:text/html,unsafe'));
 assert(searchCatalog(reports, 'report', '').items.every(item => item.report.status === 'active'));

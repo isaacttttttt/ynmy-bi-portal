@@ -15,11 +15,68 @@ export interface Notice {
   content: string; url?: string; attachment?: { name: string; url: string };
 }
 export interface QuickEntry { id: string; name: string; description: string; url: string | null; iconUrl?: string | null }
+export interface ThematicRole {
+  id: string;
+  name: string;
+  entries: Entry[];
+}
 export interface Bootstrap {
   platform?: { entryAccessUrl: string; biServiceName: string; biTabType: string };
-  user: { name: string }; rootId: string; entries: Entry[]; favoriteIds: string[];
+  user: { name: string }; rootId: string; entries: Entry[]; thematicRoles?: ThematicRole[]; favoriteIds: string[];
   quickEntries: QuickEntry[]; dataAsOf: string | null;
 }
+export interface RoleSummary {
+  id: string;
+  name: string;
+  description: string;
+  configured?: boolean;
+  enabledReportCount?: number;
+  totalReportCount?: number;
+}
+export interface RoleListPage {
+  items: RoleSummary[];
+  page: number;
+  pageSize: number;
+  hasNext: boolean;
+}
+export interface RoleAvailableReport {
+  reportId: string;
+  reportName: string;
+  reportType: Exclude<EntryType, 'folder'>;
+  catalogName: string;
+}
+export interface RoleThematicNode {
+  id: string;
+  parentId: string | null;
+  nodeType: 'folder' | 'report';
+  reportId: string | null;
+  name: string;
+  reportType: Exclude<EntryType, 'folder'> | null;
+  catalogName: string | null;
+  sort: number;
+  enabled: boolean;
+  available?: boolean;
+}
+export interface RoleThematicDetail {
+  role: {
+    id: string;
+    name: string;
+    updatedBy: string | null;
+    updatedAt: string | null;
+  };
+  nodes: RoleThematicNode[];
+  availableReports: RoleAvailableReport[];
+}
+export interface RoleThematicSaveNode {
+  id: string;
+  parentId: string | null;
+  nodeType: 'folder' | 'report';
+  reportId: string | null;
+  name: string;
+  sort: number;
+  enabled: boolean;
+}
+export type FolderAccessState = 'all' | 'partial' | 'none';
 export type WorkbenchTab = 'recent' | 'frequent' | 'favorites';
 export type WorkbenchData = Record<WorkbenchTab, Report[]>;
 export type FilterKey = 'organization' | 'status' | 'permission' | 'frequency' | 'volume';
@@ -143,4 +200,179 @@ export function safeUrl(value: string): string {
   const url = new URL(value, typeof window === 'undefined' ? 'https://portal.invalid' : window.location.origin);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('链接地址无效，请联系管理员');
   return url.href;
+}
+
+const VALID_NODE_ID = /^[\w.:-]{1,128}$/;
+
+export function normalizeSiblingSorts<T extends { id: string; parentId: string | null; sort: number }>(nodes: T[]): T[] {
+  const byParent = new Map<string, T[]>();
+  for (const node of nodes) {
+    const key = node.parentId ?? '';
+    const list = byParent.get(key) || [];
+    list.push(node);
+    byParent.set(key, list);
+  }
+  const sortMap = new Map<string, number>();
+  for (const list of byParent.values()) {
+    list.sort((a, b) => a.sort - b.sort || a.id.localeCompare(b.id));
+    list.forEach((item, index) => sortMap.set(item.id, index));
+  }
+  return nodes.map(node => ({ ...node, sort: sortMap.get(node.id) ?? 0 }));
+}
+
+export function validateRoleThematicNodes(nodes: RoleThematicSaveNode[]): { ok: true; nodes: RoleThematicSaveNode[] } | { ok: false; message: string } {
+  if (!Array.isArray(nodes)) return { ok: false, message: '节点数据格式不正确' };
+  if (nodes.length > 2000) return { ok: false, message: '单个角色最多配置 2000 个节点' };
+  const byId = new Map<string, RoleThematicSaveNode>();
+  const reportIds = new Set<string>();
+  const cleaned: RoleThematicSaveNode[] = [];
+  for (const raw of nodes) {
+    if (!raw || typeof raw !== 'object') return { ok: false, message: '存在无效节点' };
+    const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+    const parentId = raw.parentId === null || raw.parentId === undefined ? null : typeof raw.parentId === 'string' ? raw.parentId.trim() : '';
+    const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+    const reportId = raw.reportId === null || raw.reportId === undefined ? null : typeof raw.reportId === 'string' ? raw.reportId.trim() : '';
+    if (!VALID_NODE_ID.test(id)) return { ok: false, message: '节点 ID 格式无效' };
+    if (byId.has(id)) return { ok: false, message: '存在重复的节点 ID' };
+    if (parentId !== null && !VALID_NODE_ID.test(parentId)) return { ok: false, message: '父目录 ID 格式无效' };
+    if (parentId === id) return { ok: false, message: '目录不能以自身作为父目录' };
+    if (raw.nodeType !== 'folder' && raw.nodeType !== 'report') return { ok: false, message: '节点类型无效' };
+    if (!name || name.length > 256) return { ok: false, message: '目录或报表名称不能为空且不能超过 256 个字符' };
+    if (raw.nodeType === 'folder' && reportId !== null && reportId !== '') return { ok: false, message: '目录节点不能绑定报表 ID' };
+    if (raw.nodeType === 'report') {
+      if (!reportId || !VALID_NODE_ID.test(reportId)) return { ok: false, message: '报表节点缺少有效的报表 ID' };
+      if (reportIds.has(reportId)) return { ok: false, message: `同一角色下不能重复添加报表（${name}）` };
+      reportIds.add(reportId);
+    }
+    const sort = Number.isFinite(Number(raw.sort)) ? Math.max(0, Math.trunc(Number(raw.sort))) : 0;
+    const item: RoleThematicSaveNode = {
+      id, parentId: parentId || null, nodeType: raw.nodeType,
+      reportId: raw.nodeType === 'report' ? reportId : null,
+      name, sort, enabled: Boolean(raw.enabled),
+    };
+    byId.set(id, item);
+    cleaned.push(item);
+  }
+  for (const node of cleaned) {
+    let cursor = node.parentId;
+    let depth = 0;
+    const visited = new Set<string>([node.id]);
+    while (cursor !== null) {
+      const parent = byId.get(cursor);
+      if (!parent) return { ok: false, message: `节点“${node.name}”的父目录不存在` };
+      if (parent.nodeType !== 'folder') return { ok: false, message: `节点“${node.name}”不能挂载在报表下方` };
+      if (visited.has(parent.id)) return { ok: false, message: '目录层级存在循环引用' };
+      visited.add(parent.id);
+      depth++;
+      if (depth > 10) return { ok: false, message: '目录层级最多支持 10 级嵌套' };
+      cursor = parent.parentId;
+    }
+  }
+  return { ok: true, nodes: normalizeSiblingSorts(cleaned) };
+}
+
+export function isDescendantNode(nodes: ReadonlyArray<{ id: string; parentId: string | null }>, ancestorId: string, targetId: string | null): boolean {
+  if (!targetId) return false;
+  if (ancestorId === targetId) return true;
+  const parentMap = new Map(nodes.map(n => [n.id, n.parentId]));
+  let cursor: string | null | undefined = targetId;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === ancestorId) return true;
+    seen.add(cursor);
+    cursor = parentMap.get(cursor);
+  }
+  return false;
+}
+
+export function folderAccessState(nodes: ReadonlyArray<Pick<RoleThematicNode, 'id' | 'parentId' | 'nodeType' | 'enabled'>>, folderId: string): FolderAccessState {
+  const folder = nodes.find(n => n.id === folderId);
+  if (!folder || !folder.enabled) return 'none';
+  const childrenByParent = new Map<string, typeof nodes[number][]>();
+  for (const node of nodes) {
+    if (!node.parentId) continue;
+    const list = childrenByParent.get(node.parentId) || [];
+    list.push(node);
+    childrenByParent.set(node.parentId, list);
+  }
+  let totalReports = 0;
+  let enabledReports = 0;
+  const stack: Array<{ id: string; effectiveParentEnabled: boolean }> = [{ id: folderId, effectiveParentEnabled: true }];
+  const seen = new Set<string>([folderId]);
+  while (stack.length) {
+    const current = stack.pop()!;
+    for (const child of childrenByParent.get(current.id) || []) {
+      if (seen.has(child.id)) continue;
+      seen.add(child.id);
+      const effective = current.effectiveParentEnabled && child.enabled;
+      if (child.nodeType === 'report') {
+        totalReports++;
+        if (effective) enabledReports++;
+      } else {
+        stack.push({ id: child.id, effectiveParentEnabled: effective });
+      }
+    }
+  }
+  if (totalReports === 0) return folder.enabled ? 'all' : 'none';
+  if (enabledReports === 0) return 'none';
+  if (enabledReports === totalReports) return 'all';
+  return 'partial';
+}
+
+export function moveRoleThematicNode<T extends { id: string; parentId: string | null; nodeType: 'folder' | 'report'; sort: number }>(
+  nodes: T[],
+  sourceId: string,
+  targetId: string | null,
+  position: 'before' | 'after' | 'inside',
+): T[] {
+  const source = nodes.find(n => n.id === sourceId);
+  if (!source) return nodes;
+  if (targetId === sourceId) return nodes;
+  let nextParentId: string | null = null;
+  if (position === 'inside') {
+    if (targetId !== null) {
+      const target = nodes.find(n => n.id === targetId);
+      if (!target || target.nodeType !== 'folder') return nodes;
+      if (isDescendantNode(nodes, sourceId, targetId)) return nodes;
+      nextParentId = target.id;
+    } else {
+      nextParentId = null;
+    }
+  } else {
+    const target = targetId ? nodes.find(n => n.id === targetId) : undefined;
+    if (!target) return nodes;
+    if (target.parentId && isDescendantNode(nodes, sourceId, target.parentId)) return nodes;
+    nextParentId = target.parentId;
+  }
+  const siblings = nodes
+    .filter(n => n.parentId === nextParentId && n.id !== sourceId)
+    .sort((a, b) => a.sort - b.sort || a.id.localeCompare(b.id));
+  let insertAt = siblings.length;
+  if (position !== 'inside' && targetId) {
+    const idx = siblings.findIndex(n => n.id === targetId);
+    insertAt = idx < 0 ? siblings.length : position === 'before' ? idx : idx + 1;
+  }
+  const updatedSource = { ...source, parentId: nextParentId };
+  siblings.splice(insertAt, 0, updatedSource);
+  const sortLookup = new Map<string, number>();
+  siblings.forEach((item, index) => sortLookup.set(item.id, index));
+  const updated = nodes.map(node => {
+    if (node.id === sourceId) return { ...updatedSource, sort: sortLookup.get(sourceId) ?? 0 };
+    if (sortLookup.has(node.id)) return { ...node, sort: sortLookup.get(node.id)! };
+    return node;
+  });
+  return normalizeSiblingSorts(updated);
+}
+
+export function roleThematicBreadcrumb(entries: Entry[], folderId: string | null): Entry[] {
+  if (!folderId) return [];
+  const path: Entry[] = [];
+  const seen = new Set<string>();
+  let current = entries.find(e => e.id === folderId);
+  while (current && !seen.has(current.id)) {
+    path.unshift(current);
+    seen.add(current.id);
+    current = current.parentId ? entries.find(e => e.id === current?.parentId) : undefined;
+  }
+  return path;
 }

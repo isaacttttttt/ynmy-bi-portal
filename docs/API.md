@@ -40,24 +40,41 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 
 ## GET /bootstrap
 
-返回登录上下文、专题授权树、收藏 ID、启用的快捷入口与数据日期。树是扁平结构，父子关系用 ID，不能按名称或拼接路径关联。树中可包含模板尚无元数据的条目，专题仍可显示；字典显示全部字典记录，缺少明细或平台授权仍保留说明，未授权记录禁用打开和收藏。
+返回登录上下文、按角色配置的专题目录树（`thematicRoles`）、收藏 ID、启用的快捷入口与数据日期。专题分析数据链路为 `dim_bi_user.role_id` → `portal_role_thematic_config` / `portal_role_thematic_node`（仅返回启用节点，报表节点与帆软当前用户权限树 `tree` 取交集并补齐 `templateId`/`url`/`iconUrl`）。树是扁平结构，父子关系用 ID，顶级节点 `parentId` 为 `null`。首页专题分析支持在标题栏及面包屑中直接切换角色并逐级下钻目录；未配置角色或目录为空显示空态。
 
 ```json
 {
   "success": true,
   "data": {
     "user": {"name":"当前用户"},
-    "rootId":"configured-top-directory-id",
+    "rootId":"",
     "dataAsOf":"2026-10-22",
     "favoriteIds":["entry-123"],
-    "entries":[
-      {"id":"health","parentId":"configured-top-directory-id","name":"健康品事业群","type":"folder","sort":0},
-      {"id":"entry-123","parentId":"health","name":"经营分析","type":"bi","templateId":"publish-task-id","sort":1}
+    "entries":[],
+    "thematicRoles":[
+      {
+        "id":"role-health",
+        "name":"健康品分析角色",
+        "entries":[
+          {"id":"node-folder-1","parentId":null,"name":"核心专题","type":"folder","sort":0},
+          {"id":"entry-123","parentId":"node-folder-1","name":"经营分析","type":"bi","templateId":"publish-task-id","sort":0}
+        ]
+      }
     ],
     "quickEntries":[{"id":"help","name":"BI帮助文档","description":"平台操作与使用指南","url":"https://help.fanruan.com/finebi"}]
   }
 }
 ```
+
+## 角色专题目录配置接口（独立挂载页 `/portal/role-thematic-config/`）
+
+独立功能页通过 `/portal/role-thematic-config/` 挂载到帆软主平台，由主平台自身权限控制入口可见性。接口继续复用同源会话鉴权，并通过帆软 `/v10/roles?privilegeType=2` 校验当前账号仅可配置自己有管理权限的角色。
+
+| 请求 | 参数 | 说明 |
+| --- | --- | --- |
+| `GET /role-thematic/roles` | `page=1`, `pageSize=15` (1–50), `q` | 代理帆软 `/v10/roles`（附加 `privilegeType=2` 与时间戳 `_`），平铺分页返回角色及已配置统计 |
+| `GET /role-thematic/roles/:roleId` | `roleName` (可选检索提示) | 返回该角色的配置主信息（`role`）、已有目录报表树（`nodes`）及底表 `dim_bi_role_report_rel` LEFT JOIN `dim_bi_report_info_dtl` 的可配置报表（`availableReports`） |
+| `POST /role-thematic/roles/:roleId/tree` | JSON: `{roleName?, nodes: [...]}` | 校验同源 Origin、角色管理权限、树结构合法性（无环、深度≤10、同角色报表不重复、报表属于该角色底表）后，在单个数据库事务内保存配置并返回最新详情 |
 
 `Entry.type` 枚举：`folder | bi | fvs | frm | cpt | url`。`iconUrl` 可选，提供 HTTPS 图片地址。`url` 类型必须提供 `url`。图标请求失败使用类型默认切图。`sort` 数值升序，事业群默认选择根目录下排序第一的文件夹；目录为空显示空态，不伪造事业群。
 

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
+import { usePathname } from 'next/navigation';
 import { ChevronDown, ChevronUp, Monitor } from 'lucide-react';
 
 const modes = [
@@ -15,6 +16,14 @@ const designWidth = 1920;
 const DisplayContext = createContext<{ mode: DisplayMode; choose: (mode: DisplayMode) => void } | null>(null);
 
 export default function PortalViewport({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  if (pathname?.startsWith('/role-thematic-config')) {
+    return <div className="portal-viewport role-config-viewport">{children}</div>;
+  }
+  return <ScaledPortalViewport>{children}</ScaledPortalViewport>;
+}
+
+function ScaledPortalViewport({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<DisplayMode>('fit');
   const viewport = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLDivElement>(null);

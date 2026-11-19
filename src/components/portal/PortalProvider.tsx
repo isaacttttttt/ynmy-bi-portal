@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 import { message } from 'antd';
 import { Star, SearchX, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -62,6 +63,11 @@ export function usePortal() {
   return context;
 }
 export function PortalProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  if (pathname?.startsWith('/role-thematic-config')) return <>{children}</>;
+  return <PortalSessionProvider>{children}</PortalSessionProvider>;
+}
+function PortalSessionProvider({ children }: { children: ReactNode }) {
   const result = usePortalRequest<Bootstrap>('/bootstrap');
   const workbench = usePortalRequest<WorkbenchData>('/workbench', loadWorkbench);
   const pendingRef = useRef(new Set<string>());
