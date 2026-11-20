@@ -709,7 +709,7 @@ export default function RoleThematicConfigPage() {
         <div className="role-config-brand">
           <img src="/portal/assets/company_title.png" alt="云南白药" className="role-config-logo" />
           <div className="role-config-title-group">
-            <h1>专题分析 · 角色目录配置</h1>
+            <h1>专题分析 · 目录配置</h1>
             <p>为有管理权限的角色定制门户首页专题目录结构、报表归属与排序</p>
           </div>
         </div>
@@ -845,22 +845,6 @@ export default function RoleThematicConfigPage() {
                 <>
                   <div className="role-editor-toolbar">
                     <div className="role-toolbar-left">
-                      <button
-                        type="button"
-                        className="role-add-root-btn"
-                        onClick={() => addFolder(null)}
-                      >
-                        <Plus size={15} />
-                        新增一级目录
-                      </button>
-                      <button
-                        type="button"
-                        className="role-add-report-root-btn"
-                        onClick={() => setPickerTarget({ parentId: null, name: '根目录' })}
-                      >
-                        <Plus size={15} />
-                        添加报表
-                      </button>
                       {stats.staleReports > 0 && (
                         <button
                           type="button"
@@ -937,7 +921,27 @@ export default function RoleThematicConfigPage() {
                         }}
                       />
                     </div>
-                    <div className="role-col-name">目录 / 报表</div>
+                    <div className="role-col-name role-tree-header-name">
+                      <span>目录 / 报表</span>
+                      <div className="role-header-actions">
+                        <button
+                          type="button"
+                          className="role-add-root-btn"
+                          onClick={() => addFolder(null)}
+                        >
+                          <Plus size={14} />
+                          新增一级目录
+                        </button>
+                        <button
+                          type="button"
+                          className="role-add-report-root-btn"
+                          onClick={() => setPickerTarget({ parentId: null, name: '根目录' })}
+                        >
+                          <Plus size={14} />
+                          添加报表
+                        </button>
+                      </div>
+                    </div>
                     <div className="role-col-type">类型</div>
                     <div className="role-col-access">角色访问权限</div>
                     <div className="role-col-ops">操作</div>
@@ -1088,7 +1092,7 @@ export default function RoleThematicConfigPage() {
                                         className="role-inline-link"
                                         onClick={() => addFolder(node.id)}
                                       >
-                                        + 新增目录
+                                        + 新增子目录
                                       </button>
                                       <button
                                         type="button"
