@@ -30,16 +30,10 @@ button { border:0; background:none; color:inherit; }
 .brand-copy p { color:#6b85a7; letter-spacing:8px; font-size:clamp(13px,.83cqw,18px); margin:4px 0 0; }
 .header-tools { position:absolute; right:0; top:0; display:flex; flex-direction:column; align-items:flex-end; gap:5px; }
 .environment-label { font-size:12px; color:#587594; }
-.display-mode-switch { display:flex; gap:3px; padding:3px; background:#f5faffeb; border:1px solid #fff; border-radius:10px; }
-.display-mode-switch button { padding:5px 10px; border-radius:7px; color:#55769f; font-size:12px; white-space:nowrap; }
-.display-mode-switch button:hover { background:#e4efff; }
-.display-mode-switch button[aria-pressed="true"] { background:var(--portal-blue); color:#fff; }
 .portal-viewport { width:100%; min-height:100dvh; display:grid; justify-items:start; align-items:start; background:#dcecff url('/portal/assets/页面背景@2x.png') center top / 100% auto no-repeat; }
-.display-controls { display:flex; align-items:center; gap:4px; }
-.display-collapse,.guide-trigger { display:flex; align-items:center; gap:5px; font-size:12px; color:#376796; padding:6px 8px; border-radius:8px; background:#f5faffeb; }
-.display-mode-switch[hidden] { display:none; }
+.guide-trigger { display:flex; align-items:center; gap:5px; font-size:12px; color:#376796; padding:6px 8px; border-radius:8px; background:#f5faffeb; }
 .header-help { display:flex; align-items:center; gap:8px; }
-.guide-trigger:hover,.display-collapse:hover { background:#e4efff; }
+.guide-trigger:hover { background:#e4efff; }
 .guide-skip { margin-right:auto; }
 .portal-frame { width:100%; min-width:0; }
 .portal-frame.is-scaled { position:relative; overflow:clip; }
@@ -306,7 +300,6 @@ legend { margin-bottom:12px; font-size:15px; font-weight:600; color:#617fa6; }
 [data-display-mode="fit"] .filters,
 [data-display-mode="fit"] .dictionary-panel { height:auto; min-height:0; }
 .notices,.quick-entries { display:flex; flex-direction:column; }
-@media (prefers-reduced-motion:no-preference) { .display-mode-switch button { transition:background-color 160ms,color 160ms; } }
 :root { view-transition-name:none; }
 ::view-transition { pointer-events:none; }
 ::view-transition-group(portal-layout),::view-transition-old(portal-layout),::view-transition-new(portal-layout) { animation-duration:280ms; animation-timing-function:cubic-bezier(.2,.7,.2,1); }

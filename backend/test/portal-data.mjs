@@ -92,17 +92,16 @@ try {
       page.on('request', request => { if (request.url().includes('/api/portal/')) methods.push(request.method()); });
       await page.goto(origin + '/portal/');
       await page.locator('.workbench-card').first().waitFor();
+      assert.equal(await page.locator('.portal-viewport').getAttribute('data-display-mode'), 'fit');
+      assert.equal(await page.getByRole('button', { name: '显示模式' }).count(), 0);
       for (const width of [1280, 1920]) {
         await page.setViewportSize({ width, height: Math.round(width * 9 / 16) });
-        for (const mode of ['当前布局', '宽度自适应', '双向自适应']) {
-          await page.getByRole('button', { name: mode, exact: true }).click();
-          for (const tab of ['最近打开', '我常用的']) {
-            await page.getByRole('button', { name: tab, exact: true }).click();
-            assert.equal(await page.locator('.workbench-card').count(), 8);
-            const rows = await page.locator('.workbench-card').evaluateAll(cards => cards.map(card => Math.round(card.offsetTop)));
-            assert.equal(new Set(rows).size, 2); assert.equal(rows.filter(top => top === rows[0]).length, 4);
-            assert(await page.getByRole('region', { name: '工作台报表列表' }).evaluate(el => el.scrollHeight <= el.clientHeight + 1));
-          }
+        for (const tab of ['最近打开', '我常用的']) {
+          await page.getByRole('button', { name: tab, exact: true }).click();
+          assert.equal(await page.locator('.workbench-card').count(), 8);
+          const rows = await page.locator('.workbench-card').evaluateAll(cards => cards.map(card => Math.round(card.offsetTop)));
+          assert.equal(new Set(rows).size, 2); assert.equal(rows.filter(top => top === rows[0]).length, 4);
+          assert(await page.getByRole('region', { name: '工作台报表列表' }).evaluate(el => el.scrollHeight <= el.clientHeight + 1));
         }
       }
       const search = page.getByRole('combobox', { name: '搜索报表' });
