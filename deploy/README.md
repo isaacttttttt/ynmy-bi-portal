@@ -66,7 +66,16 @@ tail -f logs/portal.log
 FINE_TREE_CACHE_TTL_SECONDS=60
 FINE_TREE_CACHE_MAX_ENTRIES=0
 FINE_TREE_CACHE_MAX_MB=512
+FINE_IDENTITY_CACHE_TTL_SECONDS=60
+FINE_ROLES_CACHE_TTL_SECONDS=60
+PORTAL_THEMATIC_CACHE_TTL_SECONDS=60
+PORTAL_CATALOG_CACHE_TTL_SECONDS=60
 ```
+
+- `FINE_IDENTITY_CACHE_TTL_SECONDS`：按会话（token + 用户 Cookie）缓存单次查出的 `dim_bi_user`（含 `username`、`role_id`、`oa_dept_code`），并发请求自动合并，设为 `0` 可关闭持久缓存。
+- `FINE_ROLES_CACHE_TTL_SECONDS`：按会话缓存 `/v10/roles` 分页与搜索结果，同时 `/notices`、`/search-history` 和 `/role-thematic/*` 按需跳过 `/v10/view/entry/tree` 拉取。
+- `PORTAL_THEMATIC_CACHE_TTL_SECONDS`：按 `role_id` 跨用户共享缓存角色专题目录树，管理员点击“保存”时立即失效对应角色缓存；用户可见报表仍按当前会话权限实时交集过滤。
+- `PORTAL_CATALOG_CACHE_TTL_SECONDS`：跨用户共享缓存 T+1 公共字典元数据、目录元数据、快捷入口及日志截止日（不含任何个人权限或个人访问记录），设为 `0` 可关闭。
 
 每个门户节点独立缓存。同一登录 token 的并发 tree 请求合并为一次调用，成功后最多保留 60 秒；缓存命中不会延长有效期。到期自动清理，下次访问重新获取；刷新失败不使用过期权限。权限变更或会话撤销最多延迟约 60 秒感知。用户状态查询和收藏接口仍逐次执行。
 

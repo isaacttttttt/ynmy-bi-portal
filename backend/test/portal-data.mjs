@@ -43,7 +43,7 @@ try {
   let favorites = entries.map(e => e.id);
   const platform = { context: async request => ({ ...context, log: request.log }), favorites: async () => favorites,
     favorite: async (_, id, value) => { favorites = favorites.filter(item => item !== id); if (value) favorites.push(id); } };
-  Object.assign(process.env, { PUBLIC_ORIGIN: origin, FINE_ROOT_ID: 'root', PORTAL_LOG_FILE: logFile });
+  Object.assign(process.env, { PUBLIC_ORIGIN: origin, FINE_ROOT_ID: 'root', PORTAL_LOG_FILE: logFile, PORTAL_CATALOG_CACHE_TTL_SECONDS: '0' });
   delete process.env.POC_PLATFORM_URL;
   app = await buildApp({ platform, db: { query: (...args) => db.query(...args), end: async () => {} } });
   const call = async (path, method = 'GET', payload) => {

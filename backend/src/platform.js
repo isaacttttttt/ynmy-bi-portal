@@ -1,9 +1,18 @@
 import { createHash } from 'node:crypto';
 import { serialize } from 'node:v8';
 import { ApiError, cookieToken, publicUrl } from './http.js';
+import { createTtlCache } from './ttl-cache.js';
+import { parseUserRoleIds } from './role-thematic-repository.js';
 
 const upstreamError = () => new ApiError(502, 'PLATFORM_UNAVAILABLE', '帆软平台暂时不可用，请重试');
 const validId = value => typeof value === 'string' && /^[\w.:-]{1,128}$/.test(value);
+
+function parseTtlMs(raw, fallbackSeconds, label) {
+  const ms = Number(raw ?? fallbackSeconds) * 1000;
+  if (!Number.isSafeInteger(ms) || ms < 0 || ms > 2147483647) throw new Error(`Invalid ${label}`);
+  return ms;
+}
+
 export function platformClient(env = process.env, db) {
   const base = new URL(env.FINE_BASE_URL);
   if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw new Error('Invalid FINE_BASE_URL');
@@ -37,6 +46,7 @@ export function platformClient(env = process.env, db) {
   if (!publicUrl(entryAccessUrl) || !entryAccessUrl.includes('{entryId}')) throw new Error('Invalid FINE_ENTRY_ACCESS_PATH');
   const iconTemplate = env.FINE_ICON_URL_TEMPLATE || '';
   if (iconTemplate && (!publicUrl(iconTemplate) || !iconTemplate.includes('{entryId}'))) throw new Error('Invalid FINE_ICON_URL_TEMPLATE');
+  const keepTreeFolders = Boolean(env.FINE_ROOT_ID);
   const ttlMs = Number(env.FINE_TREE_CACHE_TTL_SECONDS ?? 60) * 1000;
   const maxEntries = Number(env.FINE_TREE_CACHE_MAX_ENTRIES ?? 0);
   const maxBytes = Number(env.FINE_TREE_CACHE_MAX_MB ?? 512) * 1024 * 1024;
@@ -44,8 +54,14 @@ export function platformClient(env = process.env, db) {
       !Number.isSafeInteger(maxEntries) || maxEntries < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1) {
     throw new Error('Invalid tree cache limits');
   }
+  const identityTtlMs = parseTtlMs(env.FINE_IDENTITY_CACHE_TTL_SECONDS, 60, 'FINE_IDENTITY_CACHE_TTL_SECONDS');
+  const rolesTtlMs = parseTtlMs(env.FINE_ROLES_CACHE_TTL_SECONDS, 60, 'FINE_ROLES_CACHE_TTL_SECONDS');
   const trees = new Map(), pendingTrees = new Map(), roleCaches = new Map();
+  const identityCache = createTtlCache({ ttlMs: identityTtlMs, maxEntries: 5000 });
+  const roleListCache = createTtlCache({ ttlMs: rolesTtlMs, maxEntries: 2000 });
   let cachedBytes = 0;
+  let userQueryMode = 'full';
+
   async function call(token, path, method = 'GET', log, operation) {
     const started = Date.now();
     try {
@@ -67,28 +83,41 @@ export function platformClient(env = process.env, db) {
       if (error instanceof ApiError) throw error; throw upstreamError();
     }
   }
+
   function removeTree(key) {
     const entry = trees.get(key);
     if (!entry) return;
     clearTimeout(entry.timer); cachedBytes -= entry.bytes; trees.delete(key);
   }
+
   async function loadTree(token, log) {
     const rows = await call(token, paths.tree, 'GET', log, 'tree');
     if (!Array.isArray(rows) || rows.length > 10000) throw upstreamError();
+    const seenIds = new Set();
     const ids = new Set();
-    const entries = rows.map(row => {
-      if (!row || !validId(row.id) || ids.has(row.id) || (row.pId !== null && !validId(row.pId)) || typeof row.text !== 'string' || (row.path !== null && typeof row.path !== 'string')) throw upstreamError();
-      ids.add(row.id);
+    const entries = [];
+    const entryMap = new Map();
+    for (const row of rows) {
+      if (!row || !validId(row.id) || seenIds.has(row.id) || (row.pId !== null && !validId(row.pId)) || typeof row.text !== 'string' || (row.path !== null && typeof row.path !== 'string')) throw upstreamError();
+      seenIds.add(row.id);
       const path = row.path?.toLowerCase() || '';
       const type = String(row.entryType) === '5' ? 'url' : row.path === null ? 'folder' : /\.fvs(?:$|[?/#])/.test(path) ? 'fvs' : /\.frm(?:$|[?/#])/.test(path) ? 'frm' : /\.cpt(?:$|[?/#])/.test(path) ? 'cpt' : 'bi';
       if (type === 'bi' && !validId(row.templateId)) throw upstreamError();
       if (type === 'url' && !publicUrl(row.path)) throw upstreamError();
-      return { id: row.id, parentId: row.pId, name: row.text, type, sort: Number(row.sortIndex) || 0,
-        ...(type === 'bi' ? { templateId: row.templateId } : {}), ...(type === 'url' ? { url: row.path } : {}),
-        ...(iconTemplate ? { iconUrl: iconTemplate.replaceAll('{entryId}', encodeURIComponent(row.id)) } : {}) };
-    });
-    return { entries, ids };
+      if (type === 'folder' && !keepTreeFolders) continue;
+      const entry = {
+        id: row.id, parentId: row.pId, name: row.text, type, sort: Number(row.sortIndex) || 0,
+        ...(type === 'bi' ? { templateId: row.templateId } : {}),
+        ...(type === 'url' ? { url: row.path } : {}),
+        ...(iconTemplate ? { iconUrl: iconTemplate.replaceAll('{entryId}', encodeURIComponent(row.id)) } : {}),
+      };
+      ids.add(row.id);
+      entries.push(entry);
+      entryMap.set(row.id, entry);
+    }
+    return { entries, ids, entryMap };
   }
+
   async function permissionTree(token, log) {
     const key = createHash('sha256').update(token).digest('hex');
     const cached = trees.get(key);
@@ -106,7 +135,7 @@ export function platformClient(env = process.env, db) {
     const pending = loadTree(token, log).then(value => {
       if (!ttlMs) return value;
       // Serialized size is a retention budget, not a limit on V8 heap or request working memory.
-      const bytes = serialize(value).byteLength;
+      const bytes = serialize({ entries: value.entries, ids: value.ids }).byteLength;
       if (bytes > maxBytes) {
         log?.info({ stage: 'tree-cache', result: 'oversized', serializedBytes: bytes }, 'tree cache');
         return value;
@@ -120,70 +149,161 @@ export function platformClient(env = process.env, db) {
     pendingTrees.set(key, pending);
     return pending;
   }
+
+  async function queryTrustedUserRows(identity) {
+    const run = async mode => {
+      const cols = mode === 'full'
+        ? 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name, oa_dept_code AS "oaDeptCode", role_id AS "roleId"'
+        : mode === 'dept'
+          ? 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name, oa_dept_code AS "oaDeptCode"'
+          : 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name';
+      const { rows } = await db.query(
+        `SELECT DISTINCT ${cols}
+         FROM dim_bi_user WHERE id=ANY($1::text[]) AND enable='true'
+           AND ($2::text IS NULL OR username=$2)`,
+        [identity.ids, identity.username],
+      );
+      return { rows, mode };
+    };
+    const modes = userQueryMode === 'full' ? ['full', 'dept', 'basic'] : userQueryMode === 'dept' ? ['dept', 'basic'] : ['basic'];
+    for (let i = 0; i < modes.length; i++) {
+      try {
+        const res = await run(modes[i]);
+        userQueryMode = modes[i];
+        return res;
+      } catch (error) {
+        if (error.code === '42703' && i < modes.length - 1) continue;
+        throw error;
+      }
+    }
+    throw upstreamError();
+  }
+
+  async function resolveUser(token, userCookie, log) {
+    const cacheKey = createHash('sha256').update(identityMode === 'trusted-cookie' ? `${token}\0${userCookie}` : token).digest('hex');
+    const loader = async () => {
+      if (identityMode === 'session') {
+        const user = await call(token, paths.session, 'GET', log, 'session');
+        if (!user || typeof user.userName !== 'string' || !user.userName || user.userName.length > 128 || typeof user.name !== 'string') throw upstreamError();
+        return { userName: user.userName, name: user.name };
+      }
+      const identity = platformIdentity(token, userCookie);
+      log?.info({ stage: 'identity', mode: identityMode, candidateCount: identity.ids.length }, 'identity parsed');
+      const { rows, mode } = await queryTrustedUserRows(identity);
+      const distinctUsers = new Map();
+      const rawRoles = [];
+      const deptCodes = new Set();
+      let hasRoleColumn = false;
+      let hasDeptColumn = false;
+      for (const row of rows) {
+        if (!row || typeof row.userName !== 'string' || !row.userName) continue;
+        if (!distinctUsers.has(row.userName)) distinctUsers.set(row.userName, row.name);
+        if (Object.hasOwn(row, 'roleId')) {
+          hasRoleColumn = true;
+          if (row.roleId !== null && row.roleId !== undefined) rawRoles.push(row.roleId);
+        }
+        if (Object.hasOwn(row, 'oaDeptCode')) {
+          hasDeptColumn = true;
+          if (typeof row.oaDeptCode === 'string' && row.oaDeptCode.trim()) deptCodes.add(row.oaDeptCode.trim());
+        }
+      }
+      log?.info({ stage: 'identity', matchedUsers: distinctUsers.size, username: distinctUsers.size === 1 ? [...distinctUsers.keys()][0] : undefined }, 'identity lookup');
+      if (distinctUsers.size !== 1) throw new ApiError(403, 'USER_UNAVAILABLE', '平台用户未同步或已停用');
+      const [[userName, name]] = [...distinctUsers.entries()];
+      if (!userName || userName.length > 128 || typeof name !== 'string') throw upstreamError();
+      return {
+        userName,
+        name,
+        ...(mode === 'full' && hasRoleColumn ? { roleIds: parseUserRoleIds(rawRoles) } : {}),
+        ...(mode !== 'basic' && hasDeptColumn ? { oaDeptCodes: [...deptCodes] } : {}),
+      };
+    };
+    if (!identityTtlMs) return loader();
+    return identityCache.getOrLoad(cacheKey, loader, {
+      onEvent: (result, size) => log?.info({ stage: 'identity-cache', result, sessions: size }, 'identity cache'),
+    });
+  }
+
   function removeRoleCache(key) {
     const entry = roleCaches.get(key);
     if (!entry) return;
     clearTimeout(entry.timer); roleCaches.delete(key);
   }
+
   function rememberRoles(token, items) {
-    if (!ttlMs || !items.length) return;
+    if (!rolesTtlMs || !items.length) return;
     const key = createHash('sha256').update(token).digest('hex');
     const now = Date.now();
     let entry = roleCaches.get(key);
     if (!entry || entry.expiresAt <= now) {
       removeRoleCache(key);
       if (roleCaches.size >= 1000) removeRoleCache(roleCaches.keys().next().value);
-      const timer = setTimeout(removeRoleCache, ttlMs, key); timer.unref();
-      entry = { map: new Map(), expiresAt: now + ttlMs, timer };
+      const timer = setTimeout(removeRoleCache, rolesTtlMs, key); timer.unref();
+      entry = { map: new Map(), expiresAt: now + rolesTtlMs, timer };
       roleCaches.set(key, entry);
     }
     for (const role of items) entry.map.set(role.id, role);
   }
+
   function cachedRole(token, roleId) {
     const key = createHash('sha256').update(token).digest('hex');
     const entry = roleCaches.get(key);
     if (!entry || entry.expiresAt <= Date.now()) { removeRoleCache(key); return null; }
     return entry.map.get(roleId) || null;
   }
+
   async function fetchRoles(token, { page = 1, count = 15, keyword = '' } = {}, log) {
-    const sep = paths.roles.includes('?') ? '&' : '?';
-    const qs = `page=${page}&keyword=${encodeURIComponent(keyword)}&count=${count}&privilegeType=${rolesPrivilegeType}&_=${Date.now()}`;
-    const data = await call(token, `${paths.roles}${sep}${qs}`, 'GET', log, 'roles');
-    if (!data || !Array.isArray(data.items) || data.items.length > 500) throw upstreamError();
-    const items = data.items.map(row => {
-      if (!row || !validId(row.id) || typeof row.text !== 'string') throw upstreamError();
-      return { id: row.id, name: row.text, description: typeof row.description === 'string' ? row.description : '' };
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const listKey = `${tokenHash}:${page}:${count}:${keyword}`;
+    return roleListCache.getOrLoad(listKey, async () => {
+      const sep = paths.roles.includes('?') ? '&' : '?';
+      const qs = `page=${page}&keyword=${encodeURIComponent(keyword)}&count=${count}&privilegeType=${rolesPrivilegeType}&_=${Date.now()}`;
+      const data = await call(token, `${paths.roles}${sep}${qs}`, 'GET', log, 'roles');
+      if (!data || !Array.isArray(data.items) || data.items.length > 500) throw upstreamError();
+      const items = data.items.map(row => {
+        if (!row || !validId(row.id) || typeof row.text !== 'string') throw upstreamError();
+        return { id: row.id, name: row.text, description: typeof row.description === 'string' ? row.description : '' };
+      });
+      rememberRoles(token, items);
+      return {
+        page: Number.isInteger(data.page) && data.page > 0 ? data.page : page,
+        pageSize: count,
+        hasNext: Boolean(data.hasNext),
+        items,
+      };
+    }, {
+      onEvent: (result, size) => log?.info({ stage: 'roles-cache', result, entries: size }, 'roles cache'),
     });
-    rememberRoles(token, items);
-    return {
-      page: Number.isInteger(data.page) && data.page > 0 ? data.page : page,
-      pageSize: count,
-      hasNext: Boolean(data.hasNext),
-      items,
-    };
   }
+
   return {
-    close() { for (const key of trees.keys()) removeTree(key); for (const key of roleCaches.keys()) removeRoleCache(key); },
+    close() {
+      for (const key of trees.keys()) removeTree(key);
+      for (const key of roleCaches.keys()) removeRoleCache(key);
+      identityCache.clear();
+      roleListCache.clear();
+    },
     browser: { entryAccessUrl, biServiceName: env.FINE_BI_SERVICE_NAME || 'dec.service.frame.tab_pane', biTabType: env.FINE_BI_TAB_TYPE || 'bi.subject.publink' },
-    async context(request) {
+    async context(request, { needTree = true } = {}) {
       const log = request.log?.child({ requestId: request.id });
-      log?.info({ stage: 'identity', mode: identityMode, tokenCookie: cookieName, userCookie: userCookieName }, 'resolving identity');
+      log?.info({ stage: 'identity', mode: identityMode, tokenCookie: cookieName, userCookie: userCookieName, needTree }, 'resolving identity');
       const token = cookieToken(request, cookieName);
-      const identity = identityMode === 'trusted-cookie' ? platformIdentity(token, cookieToken(request, userCookieName)) : null;
-      log?.info({ stage: 'identity', mode: identityMode, candidateCount: identity?.ids.length }, 'identity parsed');
-      let user = identityMode === 'session' ? await call(token, paths.session, 'GET', log, 'session') : null;
-      const { entries, ids } = await permissionTree(token, log);
-      if (identityMode === 'trusted-cookie') {
-        // The trusted gateway must validate both cookies and their user binding before proxying here.
-        const { rows: users } = await db.query(`SELECT DISTINCT username AS "userName", coalesce(nullif(realname,''),username) AS name
-          FROM dim_bi_user WHERE id=ANY($1::text[]) AND enable='true'
-            AND ($2::text IS NULL OR username=$2) LIMIT 2`, [identity.ids, identity.username]);
-        log?.info({ stage: 'identity', matchedUsers: users.length, username: users.length === 1 ? users[0].userName : undefined }, 'identity lookup');
-        if (users.length !== 1) throw new ApiError(403, 'USER_UNAVAILABLE', '平台用户未同步或已停用');
-        user = users[0];
+      const userCookie = identityMode === 'trusted-cookie' ? cookieToken(request, userCookieName) : '';
+      // Validate cookie format synchronously before any upstream/DB work.
+      if (identityMode === 'trusted-cookie') platformIdentity(token, userCookie);
+      if (needTree) {
+        if (identityMode === 'trusted-cookie') {
+          // Run tree validation first; if token is expired FineBI returns 401 before exposing user errors.
+          const tree = await permissionTree(token, log);
+          const user = await resolveUser(token, userCookie, log);
+          return { token, user, entries: tree.entries, ids: tree.ids, entryMap: tree.entryMap, log };
+        }
+        const user = await resolveUser(token, userCookie, log);
+        const tree = await permissionTree(token, log);
+        return { token, user, entries: tree.entries, ids: tree.ids, entryMap: tree.entryMap, log };
       }
-      if (!user || typeof user.userName !== 'string' || !user.userName || user.userName.length > 128 || typeof user.name !== 'string') throw upstreamError();
-      return { token, user, entries, ids, log };
+      const user = await resolveUser(token, userCookie, log);
+      return { token, user, entries: [], ids: new Set(), entryMap: new Map(), log };
     },
     async favorites(context) {
       const rows = await call(context.token, paths.favorites, 'GET', context.log, 'favorites');

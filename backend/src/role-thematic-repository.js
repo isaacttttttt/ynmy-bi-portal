@@ -77,98 +77,154 @@ export async function userRoleIds(db, userName) {
   return parseUserRoleIds(rows.map(row => row.role_id));
 }
 
-export async function thematicRolesFor(db, context) {
-  let roleIds;
-  try {
-    roleIds = await userRoleIds(db, context.user.userName);
-  } catch (error) {
-    if (error.code === '42P01' || error.code === '42703') {
-      context.log?.warn({ stage: 'role-thematic', code: error.code, reason: error.message }, 'role thematic user column unavailable');
-      return [];
+function compileRoleTree(config, rawNodes) {
+  const childrenByParent = new Map();
+  for (const row of rawNodes) {
+    if (!row.node_id) continue;
+    const key = row.parent_node_id ?? '';
+    const list = childrenByParent.get(key) || [];
+    list.push(row);
+    childrenByParent.set(key, list);
+  }
+  const orderedNodes = [];
+  const visited = new Set();
+  const stack = [...(childrenByParent.get('') || [])].reverse();
+  while (stack.length) {
+    const row = stack.pop();
+    if (visited.has(row.node_id)) continue;
+    visited.add(row.node_id);
+    if (row.node_type === 'folder') {
+      orderedNodes.push({
+        nodeType: 'folder',
+        id: row.node_id,
+        parentId: row.parent_node_id,
+        name: row.node_name,
+        sort: Number(row.sort_no) || 0,
+      });
+      const children = childrenByParent.get(row.node_id) || [];
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
+    } else if (row.node_type === 'report' && row.report_id) {
+      orderedNodes.push({
+        nodeType: 'report',
+        reportId: row.report_id,
+        parentId: row.parent_node_id,
+        name: row.node_name?.trim() || '',
+        catalogName: row.catalog_name || '',
+        reportType: normalizeReportType(row.report_type),
+        sort: Number(row.sort_no) || 0,
+      });
     }
-    throw error;
+  }
+  return { configured: true, id: config.role_id, name: config.role_name, nodes: orderedNodes };
+}
+
+async function fetchCompiledRoles(db, roleIds, log) {
+  const { rows } = await db.query(
+    `/* portal: role thematic tree */
+     SELECT c.role_id, c.role_name,
+            n.node_id, n.parent_node_id, n.node_type, n.report_id,
+            n.node_name, n.sort_no, r.report_name AS catalog_name, r.report_type
+     FROM portal_role_thematic_config c
+     LEFT JOIN portal_role_thematic_node n
+       ON n.role_id = c.role_id AND n.is_enabled = TRUE
+     LEFT JOIN dim_bi_report_info_dtl r USING (report_id)
+     WHERE c.role_id = ANY($1::text[])
+     ORDER BY c.role_name, c.role_id, n.parent_node_id NULLS FIRST, n.sort_no, n.node_id`,
+    [roleIds],
+  );
+  const grouped = new Map();
+  for (const row of rows) {
+    let entry = grouped.get(row.role_id);
+    if (!entry) {
+      entry = { config: { role_id: row.role_id, role_name: row.role_name }, rows: [] };
+      grouped.set(row.role_id, entry);
+    }
+    if (row.node_id) entry.rows.push(row);
+  }
+  const compiled = new Map();
+  for (const id of roleIds) {
+    const found = grouped.get(id);
+    compiled.set(id, found ? compileRoleTree(found.config, found.rows) : { configured: false, id });
+  }
+  log?.info({ stage: 'thematic-cache', result: 'loaded', requested: roleIds.length, configured: grouped.size }, 'role thematic loaded');
+  return compiled;
+}
+
+export async function thematicRolesFor(db, context, { cache } = {}) {
+  let roleIds;
+  if (Array.isArray(context.user?.roleIds)) {
+    roleIds = context.user.roleIds;
+  } else {
+    try {
+      roleIds = await userRoleIds(db, context.user.userName);
+    } catch (error) {
+      if (error.code === '42P01' || error.code === '42703') {
+        context.log?.warn({ stage: 'role-thematic', code: error.code, reason: error.message }, 'role thematic user column unavailable');
+        return [];
+      }
+      throw error;
+    }
   }
   if (!roleIds.length) return [];
-  let configs, nodes;
-  try {
-    ({ rows: configs } = await db.query(
-      `SELECT role_id, role_name
-       FROM portal_role_thematic_config
-       WHERE role_id = ANY($1::text[])
-       ORDER BY role_name, role_id`,
-      [roleIds],
-    ));
-    if (!configs.length) return [];
-    const configuredIds = configs.map(row => row.role_id);
-    ({ rows: nodes } = await db.query(
-      `SELECT n.node_id, n.role_id, n.parent_node_id, n.node_type, n.report_id,
-              n.node_name, n.sort_no, r.report_name AS catalog_name, r.report_type
-       FROM portal_role_thematic_node n
-       LEFT JOIN dim_bi_report_info_dtl r USING (report_id)
-       WHERE n.role_id = ANY($1::text[]) AND n.is_enabled = TRUE
-       ORDER BY n.role_id, n.parent_node_id NULLS FIRST, n.sort_no, n.node_id`,
-      [configuredIds],
-    ));
-  } catch (error) {
-    if (error.code === '42P01' || error.code === '42703') {
-      context.log?.warn({ stage: 'role-thematic', code: error.code, reason: error.message }, 'role thematic tables unavailable');
-      return [];
-    }
-    throw error;
-  }
 
-  const platformEntries = new Map(context.entries.map(entry => [entry.id, entry]));
-  const nodesByRole = new Map();
-  for (const row of nodes) {
-    const list = nodesByRole.get(row.role_id) || [];
-    list.push(row);
-    nodesByRole.set(row.role_id, list);
+  const resolved = [];
+  const missing = [];
+  for (const id of roleIds) {
+    const hit = cache?.peek(id);
+    if (hit !== undefined) resolved.push(hit);
+    else missing.push(id);
   }
-
-  return configs.map(config => {
-    const rawNodes = nodesByRole.get(config.role_id) || [];
-    const childrenByParent = new Map();
-    for (const row of rawNodes) {
-      const key = row.parent_node_id ?? '';
-      const list = childrenByParent.get(key) || [];
-      list.push(row);
-      childrenByParent.set(key, list);
-    }
-    const entries = [];
-    const visited = new Set();
-    const stack = [...(childrenByParent.get('') || [])].reverse();
-    while (stack.length) {
-      const row = stack.pop();
-      if (visited.has(row.node_id)) continue;
-      visited.add(row.node_id);
-      if (row.node_type === 'folder') {
-        entries.push({
-          id: row.node_id,
-          parentId: row.parent_node_id,
-          name: row.node_name,
-          type: 'folder',
-          sort: Number(row.sort_no) || 0,
-        });
-        const children = childrenByParent.get(row.node_id) || [];
-        for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
-      } else if (row.node_type === 'report' && row.report_id && context.ids.has(row.report_id)) {
-        const platformEntry = platformEntries.get(row.report_id);
-        if (platformEntry?.type === 'folder') continue;
-        const type = platformEntry?.type || normalizeReportType(row.report_type);
-        entries.push({
-          id: row.report_id,
-          parentId: row.parent_node_id,
-          name: row.node_name?.trim() || platformEntry?.name || row.catalog_name || '未命名报表',
-          type,
-          sort: Number(row.sort_no) || 0,
-          ...(platformEntry?.templateId ? { templateId: platformEntry.templateId } : {}),
-          ...(platformEntry?.url ? { url: platformEntry.url } : {}),
-          ...(platformEntry?.iconUrl ? { iconUrl: platformEntry.iconUrl } : {}),
-        });
+  if (missing.length) {
+    try {
+      const loaded = await fetchCompiledRoles(db, missing, context.log);
+      for (const [id, value] of loaded) {
+        cache?.set(id, value);
+        resolved.push(value);
       }
+    } catch (error) {
+      if (error.code === '42P01' || error.code === '42703') {
+        context.log?.warn({ stage: 'role-thematic', code: error.code, reason: error.message }, 'role thematic tables unavailable');
+        return [];
+      }
+      throw error;
     }
-    return { id: config.role_id, name: config.role_name, entries };
-  });
+  } else if (cache) {
+    context.log?.info({ stage: 'thematic-cache', result: 'hit', roles: roleIds.length }, 'role thematic cache');
+  }
+
+  const platformEntries = context.entryMap ?? new Map(context.entries.map(entry => [entry.id, entry]));
+  return resolved
+    .filter(item => item.configured)
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+    .map(role => {
+      const entries = [];
+      for (const node of role.nodes) {
+        if (node.nodeType === 'folder') {
+          entries.push({
+            id: node.id,
+            parentId: node.parentId,
+            name: node.name,
+            type: 'folder',
+            sort: node.sort,
+          });
+        } else if (context.ids.has(node.reportId)) {
+          const platformEntry = platformEntries.get(node.reportId);
+          if (platformEntry?.type === 'folder') continue;
+          const type = platformEntry?.type || node.reportType;
+          entries.push({
+            id: node.reportId,
+            parentId: node.parentId,
+            name: node.name || platformEntry?.name || node.catalogName || '未命名报表',
+            type,
+            sort: node.sort,
+            ...(platformEntry?.templateId ? { templateId: platformEntry.templateId } : {}),
+            ...(platformEntry?.url ? { url: platformEntry.url } : {}),
+            ...(platformEntry?.iconUrl ? { iconUrl: platformEntry.iconUrl } : {}),
+          });
+        }
+      }
+      return { id: role.id, name: role.name, entries };
+    });
 }
 
 export async function roleSummaryCounts(db, roleIds) {
@@ -264,7 +320,7 @@ export async function roleThematicDetail(db, role) {
   };
 }
 
-export async function saveRoleThematicTree(db, { role, userName, nodes }) {
+export async function saveRoleThematicTree(db, { role, userName, nodes, cache }) {
   const checked = validateRoleThematicNodes(nodes);
   if (!checked.ok) throw new ApiError(400, 'INVALID_REQUEST', checked.message);
 
@@ -295,5 +351,6 @@ export async function saveRoleThematicTree(db, { role, userName, nodes }) {
     }
   });
 
+  cache?.delete(role.id);
   return roleThematicDetail(db, role);
 }

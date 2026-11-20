@@ -27,8 +27,12 @@ function client(options = {}) { const value = platformClient({ ...env, ...option
 try {
   const cached = client({ FINE_TREE_CACHE_TTL_SECONDS: '1', FINE_TREE_CACHE_MAX_ENTRIES: '2' });
   const first = await Promise.all(Array.from({ length: 20 }, () => cached.context(request('a'))));
-  assert.equal(count('a'), 1); assert.equal(lookups, 20, 'User lookup remains per request');
-  assert(first.every(c => c.entries === first[0].entries));
+  assert.equal(count('a'), 1); assert.equal(lookups, 1, 'Identity cache coalesces concurrent lookups');
+  assert(first.every(c => c.entries === first[0].entries && c.entryMap === first[0].entryMap));
+  const noIdentityCache = client({ FINE_TREE_CACHE_TTL_SECONDS: '1', FINE_IDENTITY_CACHE_TTL_SECONDS: '0' });
+  const beforeNoIdCache = lookups;
+  await Promise.all(Array.from({ length: 5 }, () => noIdentityCache.context(request('no-id-cache'))));
+  assert.equal(lookups - beforeNoIdCache, 5, 'Identity lookup remains per request when FINE_IDENTITY_CACHE_TTL_SECONDS=0');
   assert.equal((await cached.context(request('b'))).entries[0].id, 'b');
   await cached.context(request('a')); assert.equal(count('a'), 1);
   await cached.context(request('c'));

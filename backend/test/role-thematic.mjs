@@ -22,6 +22,8 @@ const roleCatalog = Array.from({ length: 18 }, (_, idx) => ({
   privilegeDetailBeanList: null,
 }));
 const roleRequests = [];
+let treeRequests = 0;
+let thematicTreeQueries = 0;
 const server = createServer((req, res) => {
   assert.equal(req.headers.authorization, 'Bearer admin-token');
   const url = new URL(req.url, 'http://127.0.0.1');
@@ -31,12 +33,14 @@ const server = createServer((req, res) => {
     return;
   }
   if (url.pathname === '/v10/view/entry/tree') {
+    treeRequests++;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       data: [
-        { id: 'rep-bi-1', pId: null, text: '库存总览', path: 'bi/stock', entryType: 1, templateId: 'tpl-bi-1', sortIndex: 1 },
-        { id: 'rep-cpt-1', pId: null, text: '仓储成本明细', path: 'stock/cost.cpt', entryType: 1, sortIndex: 2 },
-        { id: 'rep-frm-1', pId: null, text: '经营填报', path: 'ops/input.frm', entryType: 1, sortIndex: 3 },
+        { id: 'folder-ignored', pId: null, text: '平台旧目录', path: null, entryType: 1, sortIndex: 0 },
+        { id: 'rep-bi-1', pId: 'folder-ignored', text: '库存总览', path: 'bi/stock', entryType: 1, templateId: 'tpl-bi-1', sortIndex: 1 },
+        { id: 'rep-cpt-1', pId: 'folder-ignored', text: '仓储成本明细', path: 'stock/cost.cpt', entryType: 1, sortIndex: 2 },
+        { id: 'rep-frm-1', pId: 'folder-ignored', text: '经营填报', path: 'ops/input.frm', entryType: 1, sortIndex: 3 },
       ],
     }));
     return;
@@ -107,13 +111,30 @@ const db = {
         }),
       };
     }
-    if (sql.includes('FROM portal_role_thematic_config') && sql.includes('ANY($1::text[])')) {
+    if (sql.includes('/* portal: role thematic tree */')) {
+      thematicTreeQueries++;
       const ids = new Set(params[0] || []);
-      return {
-        rows: [...configs.values()]
-          .filter(c => ids.has(c.role_id))
-          .sort((a, b) => a.role_name.localeCompare(b.role_name)),
-      };
+      const rows = [];
+      for (const cfg of [...configs.values()].filter(c => ids.has(c.role_id)).sort((a, b) => a.role_name.localeCompare(b.role_name))) {
+        const avail = new Map((roleReports.get(cfg.role_id) || []).map(r => [r.report_id, r]));
+        const enabledNodes = (nodesByRole.get(cfg.role_id) || []).filter(n => n.is_enabled);
+        if (!enabledNodes.length) {
+          rows.push({
+            role_id: cfg.role_id, role_name: cfg.role_name,
+            node_id: null, parent_node_id: null, node_type: null, report_id: null,
+            node_name: null, sort_no: null, catalog_name: null, report_type: null,
+          });
+        } else {
+          for (const n of enabledNodes) {
+            const r = n.report_id ? avail.get(n.report_id) : null;
+            rows.push({
+              role_id: cfg.role_id, role_name: cfg.role_name,
+              ...n, catalog_name: r?.catalog_name || null, report_type: r?.report_type || null,
+            });
+          }
+        }
+      }
+      return { rows };
     }
     if (sql.includes('FROM portal_role_thematic_config') && sql.includes('WHERE role_id = $1')) {
       const cfg = configs.get(params[0]);
@@ -200,13 +221,18 @@ try {
   assert.equal(redirectNoSlash.statusCode, 308);
   assert.equal(redirectNoSlash.headers.location, '/portal/role-thematic-config/');
 
-  // 2. Paginated role listing (default 15 per page) + next page + search
+  // 2. Paginated role listing (default 15 per page) + next page + search (A1: zero /v10/view/entry/tree calls!)
   const page1 = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles?page=1&pageSize=15', headers: { cookie } });
   assert.equal(page1.statusCode, 200, page1.body);
+  assert.equal(treeRequests, 0, 'Role config endpoints must skip /v10/view/entry/tree');
   const p1Data = page1.json().data;
   assert.equal(p1Data.items.length, 15);
   assert.equal(p1Data.hasNext, true);
   assert.equal(p1Data.items[0].name, '供应链分析角色');
+  const rolesCallsBeforeRepeat = roleRequests.length;
+  const page1Cached = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles?page=1&pageSize=15', headers: { cookie } });
+  assert.equal(page1Cached.statusCode, 200);
+  assert.equal(roleRequests.length, rolesCallsBeforeRepeat, 'Repeated role page request hits roles cache');
 
   const page2 = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles?page=2&pageSize=15', headers: { cookie } });
   assert.equal(page2.json().data.items.length, 3);
@@ -298,6 +324,28 @@ try {
   assert.equal(r1.entries[1].parentId, 'f-root');
   assert.deepEqual(r2.entries.map(e => e.id), ['rep-frm-1']);
   assert.equal(r2.entries[0].type, 'frm');
+  assert.equal(treeRequests, 1, 'Only /bootstrap fetched /v10/view/entry/tree once');
+  // A3: Second /bootstrap hits shared thematicCache (0 extra DB queries)
+  const queriesAfterFirstBootstrap = thematicTreeQueries;
+  const bootstrapRes2 = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: { cookie } });
+  assert.equal(bootstrapRes2.statusCode, 200);
+  assert.equal(thematicTreeQueries, queriesAfterFirstBootstrap, 'Thematic tree is served from shared role cache');
+  // A3: Saving role-2 immediately invalidates its thematic cache entry
+  const save2Updated = await app.inject({
+    method: 'POST',
+    url: '/portal/api/portal/v1/role-thematic/roles/role-2/tree',
+    headers: { cookie, origin },
+    payload: {
+      roleName: '健康品经营角色',
+      nodes: [
+        { id: 'n-frm', parentId: null, nodeType: 'report', reportId: 'rep-frm-1', name: '经营填报-已更新', sort: 0, enabled: true },
+      ],
+    },
+  });
+  assert.equal(save2Updated.statusCode, 200);
+  const bootstrapRes3 = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: { cookie } });
+  assert.equal(bootstrapRes3.json().data.thematicRoles.find(r => r.id === 'role-2').entries[0].name, '经营填报-已更新');
+  assert.equal(thematicTreeQueries, queriesAfterFirstBootstrap + 1, 'Only the invalidated role is reloaded from DB');
 
   // 9. Verify role list reflects configured report counts
   const page1After = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles?page=1&pageSize=15', headers: { cookie } });
@@ -306,7 +354,7 @@ try {
   assert.equal(role1Summary.totalReportCount, 3);
   assert.equal(role1Summary.enabledReportCount, 3);
 
-  console.log('PASS: role-thematic proxy, permission verification, tree persistence, bootstrap role switching, and static route.');
+  console.log('PASS: role-thematic proxy, lazy tree, role/thematic cache & invalidation, bootstrap role switching, and static route.');
 } finally {
   if (app) await app.close();
   await new Promise(resolve => server.close(resolve));
