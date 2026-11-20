@@ -104,7 +104,7 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 
 `data` 包含 `items: Report[]`、`total`、`page`、`pageSize`、`facets`。`facets` 的五个键与筛选键相同，每组是 `{value:string,count:number}[]`。计数应用关键词和其他组条件，忽略本组条件，保留计数为0的可见选项。总数计算应用所有条件。
 
-正式底表的访问统计查询超时时，`/reports` 仍返回字典元数据及其他筛选结果，设置 `visitStatsUnavailable: true`、`views: null` 和 `facets.volume: []`。本次响应暂停应用 `volume` 条件，统计恢复后再次请求即恢复该条件。若 `/bootstrap` 读访问日志截止日超时，`dataAsOf` 返回 `null`，其余初始化数据正常返回。
+数据字典中的累计访问量（`views`）及访问量级筛选（`volume`）直接读取 `dim_bi_report_info_dtl.report_total_views`，不再实时聚合 `dim_bi_visit_log`；工作台“最近打开/我常用的”按 `user_code` 仅扫描当前用户的访问日志。若 `/bootstrap` 读访问日志截止日超时，`dataAsOf` 返回 `null`，其余初始化数据正常返回。
 
 Report 示例（卡片和详情使用同一对象，避免底表未就绪时增加空的详情接口）：
 

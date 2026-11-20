@@ -86,7 +86,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
     });
     api.get('/search', async request => {
       const { category, q } = searchQuery(request.query, true);
-      return { success: true, data: searchCatalog(await reportsFor(db, request.portal), category, q) };
+      return { success: true, data: searchCatalog(await reportsFor(db, request.portal, false, { includeUserVisits: false }), category, q) };
     });
     api.get('/search-history', async request => {
       const { category } = searchQuery(request.query);

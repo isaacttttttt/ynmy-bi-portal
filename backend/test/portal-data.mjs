@@ -28,14 +28,14 @@ try {
       business_group text, belonging_department text, suggested_owner_name text, developer_name text,
       update_cycle text, go_live_time text, usage_scenario text, core_metrics text, metrics_calc_logic text, data_source text)`);
   }
-  await db.query(`CREATE TEMP TABLE dim_bi_report_info_dtl(report_id text, report_name text, report_type text);
+  await db.query(`CREATE TEMP TABLE dim_bi_report_info_dtl(report_id text, report_name text, report_type text, report_total_views bigint);
     CREATE TEMP TABLE dim_bi_visit_log(day_id text, report_id text, user_code text, visit_num text);
     CREATE TEMP TABLE fr_quick_entry_app(sort_no int, app_id text, status int)`);
   await db.query((await readFile(new URL('../sql/003-search-history.sql', import.meta.url), 'utf8'))
     .replace('CREATE TABLE IF NOT EXISTS', 'CREATE TEMP TABLE'));
   await db.query(`INSERT INTO dim_bi_report_dictionary(id,report_id,report_name,business_group,belonging_department,go_live_time)
     SELECT 'qa-'||i, 'qa-'||i, 'QA报表'||i, 'QA事业群', 'QA部门', '' FROM generate_series(1,10) i;
-    INSERT INTO dim_bi_report_info_dtl SELECT 'qa-'||i,'QA报表'||i,'cpt' FROM generate_series(1,10) i;
+    INSERT INTO dim_bi_report_info_dtl SELECT 'qa-'||i,'QA报表'||i,'cpt', 11-i FROM generate_series(1,10) i;
     INSERT INTO dim_bi_visit_log SELECT ('2026-11-01'::date+i)::text,'qa-'||i,'qa-user',(11-i)::text FROM generate_series(1,10) i`);
   await assert.rejects(db.query('SELECT go_live_time::date FROM dim_bi_report_dictionary'), { code: '22007' });
   const entries = Array.from({ length: 10 }, (_, i) => ({ id: `qa-${i+1}`, name: `QA报表${i+1}`, type: 'cpt', parentId: null, sort: i }));
@@ -136,11 +136,10 @@ try {
       SET statement_timeout = 5000`);
     await locker.query(`BEGIN; LOCK TABLE ${schema}.dim_bi_visit_log IN ACCESS EXCLUSIVE MODE`);
     assert.equal((await call('/bootstrap')).dataAsOf, null);
-    const unavailable = await call('/reports?q=QA&volume=high');
-    assert.equal(unavailable.total, 10, 'The metadata query serves the dictionary during a stats lock');
-    assert.equal(unavailable.visitStatsUnavailable, true);
-    assert.deepEqual(unavailable.facets.volume, []);
-    assert(unavailable.items.every(r => r.views === null && r.permission === 'granted'));
+    const duringLock = await call('/reports?q=QA&volume=low');
+    assert.equal(duringLock.total, 10, 'Dictionary reads report_total_views without touching dim_bi_visit_log');
+    assert.equal(duringLock.visitStatsUnavailable, undefined);
+    assert(duringLock.items.every(r => r.views > 0 && r.permission === 'granted'));
     await locker.query('ROLLBACK');
     assert.equal((await call('/reports?q=QA&volume=high')).total, 0);
     const restored = await call('/reports?q=QA&volume=low');
@@ -164,7 +163,6 @@ try {
   assert.equal(error.code, '42703');
   assert.match(error.reason, /business_group/); assert(error.stack);
   assert(logs.some(line => line.stage === 'parameters' && line.body?.query === 'roi'));
-  assert(logs.some(line => line.stage === 'dictionary-visits' && line.code === '57014'));
   assert(logs.some(line => line.stage === 'visit-log-date' && line.code === '57014'));
   console.log('PASS: real PG empty dates, business_group facets, top eight, POST history persistence/clear/isolation, favorites and file error logs.');
 } finally {

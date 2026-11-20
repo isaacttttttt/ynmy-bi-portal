@@ -7,9 +7,10 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test": "node test/config.mjs && node test/role-thematic.mjs",
+    "test": "node test/config.mjs && node test/role-thematic.mjs && node test/report-views.mjs",
     "test:routes": "node test/config.mjs",
     "test:role-thematic": "node test/role-thematic.mjs",
+    "test:report-views": "node test/report-views.mjs",
     "test:customer": "node test/customer.mjs",
     "test:tree-cache": "node test/tree-cache.mjs"
   },
