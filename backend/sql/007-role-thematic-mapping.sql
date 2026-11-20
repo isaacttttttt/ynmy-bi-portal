@@ -100,9 +100,9 @@ CREATE INDEX IF NOT EXISTS idx_portal_role_report_rel_role
 -- ============================================================================
 -- 4. dim_bi_user.role_id 字段说明（如已有该列则无需执行）
 --    支持以下任意一种存储方式：
---      a) 单个角色ID：'role-001'
---      b) 逗号分隔多个角色ID：'role-001,role-002'
---      c) 同一 username 多行（每行一个 role_id）
+--      a) JSON 数组字符串（客户当前格式）：'["c494004d-701e-4449-9244-cb4f9bb3c9a7","xxxx"]'
+--      b) 单个角色ID或逗号分隔多个角色ID：'role-001' / 'role-001,role-002'
+--      c) 同一 username 多行（每行一个或多个 role_id）
 -- ============================================================================
 -- ALTER TABLE public.dim_bi_user ADD COLUMN IF NOT EXISTS role_id VARCHAR(2048);
 

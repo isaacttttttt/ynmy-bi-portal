@@ -33,16 +33,48 @@ async function withTransaction(db, fn) {
   return fn(db);
 }
 
+export function parseUserRoleIds(rawValues) {
+  const result = new Set();
+  for (const raw of rawValues) {
+    if (raw === null || raw === undefined) continue;
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        if (typeof item === 'string' && item.trim()) result.add(item.trim());
+      }
+      continue;
+    }
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (typeof item === 'string' && item.trim()) result.add(item.trim());
+          }
+          continue;
+        }
+      } catch {
+        // Fall through to delimiter parsing if malformed JSON array string.
+      }
+    }
+    for (const part of trimmed.replace(/^\[|\]$/g, '').split(',')) {
+      const cleaned = part.trim().replace(/^["']|["']$/g, '').trim();
+      if (cleaned) result.add(cleaned);
+    }
+  }
+  return [...result].sort();
+}
+
 export async function userRoleIds(db, userName) {
   const { rows } = await db.query(
-    `SELECT DISTINCT trim(rid) AS role_id
-     FROM dim_bi_user u,
-          LATERAL unnest(string_to_array(coalesce(u.role_id, ''), ',')) AS rid
-     WHERE u.username = $1 AND u.enable = 'true' AND trim(rid) <> ''
-     ORDER BY role_id`,
+    `SELECT u.role_id
+     FROM dim_bi_user u
+     WHERE u.username = $1 AND u.enable = 'true' AND u.role_id IS NOT NULL`,
     [userName],
   );
-  return rows.map(row => row.role_id);
+  return parseUserRoleIds(rows.map(row => row.role_id));
 }
 
 export async function thematicRolesFor(db, context) {

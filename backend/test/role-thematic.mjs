@@ -2,6 +2,16 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { platformClient } from '../src/platform.js';
 import { buildApp } from '../src/app.js';
+import { parseUserRoleIds } from '../src/role-thematic-repository.js';
+
+// Unit checks for dim_bi_user.role_id JSON array / string / array parsing
+assert.deepEqual(
+  parseUserRoleIds(['["c494004d-701e-4449-9244-cb4f9bb3c9a7","xxxx","xxx"]']),
+  ['c494004d-701e-4449-9244-cb4f9bb3c9a7', 'xxx', 'xxxx'],
+);
+assert.deepEqual(parseUserRoleIds(['[]', '', null, undefined]), []);
+assert.deepEqual(parseUserRoleIds([['role-2', 'role-1'], '["role-1","role-3"]']), ['role-1', 'role-2', 'role-3']);
+assert.deepEqual(parseUserRoleIds(['role-a, role-b']), ['role-a', 'role-b']);
 
 // In-memory mock FineBI upstream supporting session, tree, favorites and paginated /v10/roles
 const roleCatalog = Array.from({ length: 18 }, (_, idx) => ({
@@ -72,8 +82,8 @@ const roleReports = new Map([
     { report_id: 'rep-frm-1', report_name: '经营填报', catalog_name: '经营填报', report_type: 'frm' },
   ]],
 ]);
-// User alice has two roles (comma-separated in dim_bi_user.role_id)
-const userRolesMap = new Map([['alice', ['role-1', 'role-2']]]);
+// User alice has two roles stored as JSON array string in dim_bi_user.role_id
+const userRolesMap = new Map([['alice', ['["role-1","role-2"]']]]);
 
 const db = {
   async query(sql, params = []) {
@@ -182,10 +192,13 @@ try {
   app = await buildApp({ platform, db });
   const cookie = 'fine_auth_token=admin-token';
 
-  // 1. Standalone route served under /portal/role-thematic-config/
+  // 1. Standalone route served under /portal/role-thematic-config/ (and redirects without trailing slash)
   const html = await app.inject('/portal/role-thematic-config/');
   assert.equal(html.statusCode, 200);
   assert.equal(html.headers['cache-control'], 'private, no-store');
+  const redirectNoSlash = await app.inject('/portal/role-thematic-config');
+  assert.equal(redirectNoSlash.statusCode, 308);
+  assert.equal(redirectNoSlash.headers.location, '/portal/role-thematic-config/');
 
   // 2. Paginated role listing (default 15 per page) + next page + search
   const page1 = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles?page=1&pageSize=15', headers: { cookie } });
