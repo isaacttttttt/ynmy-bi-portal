@@ -1,18 +1,33 @@
 import { ApiError } from './http.js';
 import { validateRoleThematicNodes } from '../../src/lib/portal-model.ts';
 
-const VALID_TABLE = /^[a-z_][a-z0-9_]*$/i;
+const VALID_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
 const VALID_TYPES = new Set(['bi', 'fvs', 'frm', 'cpt', 'url']);
 
-function roleReportTable(env = process.env) {
-  const name = (env.DB_ROLE_REPORT_TABLE || 'dim_bi_role_report_rel').trim();
-  if (!VALID_TABLE.test(name)) throw new Error('Invalid DB_ROLE_REPORT_TABLE');
+export function fineDbSchema(env = process.env) {
+  const name = (env.FINEDB_SCHEMA || 'finedb').trim();
+  if (!VALID_IDENTIFIER.test(name)) throw new Error('Invalid FINEDB_SCHEMA');
   return name;
 }
 
 function normalizeReportType(value) {
   const lowered = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return VALID_TYPES.has(lowered) ? lowered : 'cpt';
+}
+
+export function inferReportTypeFromAuthorityObject(expandType, pathValue, fallbackType = null) {
+  const typeNum = Number(expandType);
+  const path = typeof pathValue === 'string' ? pathValue.trim().toLowerCase() : '';
+  if (typeNum === 201) return 'bi';
+  if (typeNum === 5 || /^https?:\/\//.test(path)) return 'url';
+  if (/\.fvs(?:$|[?/#])/.test(path)) return 'fvs';
+  if (/\.frm(?:$|[?/#])/.test(path)) return 'frm';
+  if (/\.cpt(?:$|[?/#])/.test(path)) return 'cpt';
+  if (typeof fallbackType === 'string' && VALID_TYPES.has(fallbackType.trim().toLowerCase())) {
+    return fallbackType.trim().toLowerCase();
+  }
+  if (typeNum === 102) return 'cpt';
+  return 'bi';
 }
 
 async function withTransaction(db, fn) {
@@ -67,11 +82,18 @@ export function parseUserRoleIds(rawValues) {
   return [...result].sort();
 }
 
-export async function userRoleIds(db, userName) {
+export async function userRoleIds(db, userName, env = process.env) {
+  const schema = fineDbSchema(env);
   const { rows } = await db.query(
-    `SELECT u.role_id
-     FROM dim_bi_user u
-     WHERE u.username = $1 AND u.enable = 'true' AND u.role_id IS NOT NULL`,
+    `/* portal: finedb user roles */
+     SELECT DISTINCT urm.roleid AS role_id
+     FROM ${schema}.fine_user_role_middle urm
+     JOIN ${schema}.fine_user fu ON fu.id = urm.userid
+     WHERE fu.username = $1
+       AND urm.roletype = 2
+       AND urm.roleid IS NOT NULL
+       AND trim(urm.roleid) <> ''
+     ORDER BY urm.roleid`,
     [userName],
   );
   return parseUserRoleIds(rows.map(row => row.role_id));
@@ -158,8 +180,8 @@ export async function thematicRolesFor(db, context, { cache } = {}) {
     try {
       roleIds = await userRoleIds(db, context.user.userName);
     } catch (error) {
-      if (error.code === '42P01' || error.code === '42703') {
-        context.log?.warn({ stage: 'role-thematic', code: error.code, reason: error.message }, 'role thematic user column unavailable');
+      if (error.code === '42P01' || error.code === '42703' || error.code === '3F000') {
+        context.log?.warn({ stage: 'role-thematic', code: error.code, reason: error.message }, 'role thematic finedb user roles unavailable');
         return [];
       }
       throw error;
@@ -246,25 +268,72 @@ export async function roleSummaryCounts(db, roleIds) {
   }]));
 }
 
-export async function availableReportsForRole(db, roleId) {
-  const table = roleReportTable();
+export async function availableReportsForRole(db, roleId, env = process.env) {
+  const schema = fineDbSchema(env);
   const { rows } = await db.query(
-    `SELECT DISTINCT ON (rel.report_id)
-            rel.report_id,
-            coalesce(nullif(trim(rel.report_name), ''), nullif(trim(r.report_name), ''), rel.report_id) AS report_name,
-            coalesce(nullif(trim(r.report_name), ''), nullif(trim(rel.report_name), ''), rel.report_id) AS catalog_name,
+    `/* portal: finedb role reports */
+     WITH RECURSIVE direct_auth AS (
+       SELECT fa.authorityentityid AS object_id,
+              min(fa.authority) AS direct_auth
+       FROM ${schema}.fine_authority fa
+       WHERE fa.roleid = $1
+         AND fa.authoritytype IN (1, 102, 206)
+         AND fa.authority IN (1, 2)
+         AND fa.authorityentityid IS NOT NULL
+         AND trim(fa.authorityentityid) <> ''
+       GROUP BY fa.authorityentityid
+     ),
+     allowed_tree AS (
+       SELECT fao.id,
+              fao.parentid,
+              fao.displayname,
+              fao.expandtype,
+              fao.path,
+              ARRAY[fao.id::text] AS visited,
+              0 AS depth
+       FROM ${schema}.fine_authority_object fao
+       JOIN direct_auth da ON da.object_id = fao.id AND da.direct_auth = 2
+       WHERE coalesce(fao.expandtype, 0) NOT IN (1, 2)
+
+       UNION ALL
+
+       SELECT child.id,
+              child.parentid,
+              child.displayname,
+              child.expandtype,
+              child.path,
+              t.visited || child.id::text,
+              t.depth + 1
+       FROM allowed_tree t
+       JOIN ${schema}.fine_authority_object child ON child.parentid = t.id
+       LEFT JOIN direct_auth da ON da.object_id = child.id
+       WHERE da.direct_auth IS NULL
+         AND coalesce(child.expandtype, 0) NOT IN (1, 2)
+         AND t.depth < 32
+         AND NOT (child.id::text = ANY(t.visited))
+     )
+     SELECT DISTINCT ON (t.id)
+            t.id AS report_id,
+            coalesce(nullif(trim(t.displayname), ''), nullif(trim(r.report_name), ''), t.id) AS report_name,
+            coalesce(nullif(trim(r.report_name), ''), nullif(trim(t.displayname), ''), t.id) AS catalog_name,
+            t.expandtype AS expand_type,
+            t.path AS object_path,
             r.report_type
-     FROM ${table} rel
-     LEFT JOIN dim_bi_report_info_dtl r USING (report_id)
-     WHERE rel.role_id = $1 AND rel.report_id IS NOT NULL AND trim(rel.report_id) <> ''
-     ORDER BY rel.report_id`,
+     FROM allowed_tree t
+     LEFT JOIN dim_bi_report_info_dtl r ON r.report_id = t.id
+     WHERE t.id IS NOT NULL
+       AND trim(t.id) <> ''
+       AND t.id NOT LIKE '%decision%'
+       AND t.expandtype IS NOT NULL
+       AND t.expandtype NOT IN (1, 2, 3)
+     ORDER BY t.id`,
     [roleId],
   );
   return rows
     .map(row => ({
       reportId: row.report_id,
       reportName: row.report_name,
-      reportType: normalizeReportType(row.report_type),
+      reportType: inferReportTypeFromAuthorityObject(row.expand_type, row.object_path, row.report_type),
       catalogName: row.catalog_name,
     }))
     .sort((a, b) => a.reportName.localeCompare(b.reportName, 'zh-CN') || a.reportId.localeCompare(b.reportId));

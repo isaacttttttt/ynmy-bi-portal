@@ -2,9 +2,29 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { platformClient } from '../src/platform.js';
 import { buildApp } from '../src/app.js';
-import { parseUserRoleIds } from '../src/role-thematic-repository.js';
+import {
+  availableReportsForRole,
+  fineDbSchema,
+  inferReportTypeFromAuthorityObject,
+  parseUserRoleIds,
+  userRoleIds,
+} from '../src/role-thematic-repository.js';
 
-// Unit checks for dim_bi_user.role_id JSON array / string / array parsing
+// Unit checks for FineDB schema validation & report type inference
+assert.equal(fineDbSchema({}), 'finedb');
+assert.equal(fineDbSchema({ FINEDB_SCHEMA: 'custom_finedb' }), 'custom_finedb');
+assert.throws(() => fineDbSchema({ FINEDB_SCHEMA: 'finedb; DROP TABLE x' }), /Invalid FINEDB_SCHEMA/);
+
+assert.equal(inferReportTypeFromAuthorityObject(201, 'any/path'), 'bi');
+assert.equal(inferReportTypeFromAuthorityObject(5, 'https://example.com/a'), 'url');
+assert.equal(inferReportTypeFromAuthorityObject(102, 'ops/board.fvs'), 'fvs');
+assert.equal(inferReportTypeFromAuthorityObject(102, 'ops/input.frm?op=write'), 'frm');
+assert.equal(inferReportTypeFromAuthorityObject(102, 'ops/detail.cpt'), 'cpt');
+assert.equal(inferReportTypeFromAuthorityObject(102, 'ops/unknown', 'fvs'), 'fvs');
+assert.equal(inferReportTypeFromAuthorityObject(102, 'ops/unknown', null), 'cpt');
+assert.equal(inferReportTypeFromAuthorityObject(6, 'https://example.com/doc'), 'url');
+
+// Unit checks for parseUserRoleIds helper
 assert.deepEqual(
   parseUserRoleIds(['["c494004d-701e-4449-9244-cb4f9bb3c9a7","xxxx","xxx"]']),
   ['c494004d-701e-4449-9244-cb4f9bb3c9a7', 'xxx', 'xxxx'],
@@ -73,29 +93,107 @@ const server = createServer((req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 
-// In-memory stateful PostgreSQL stub for role-thematic tables & user roles
+// In-memory stateful PostgreSQL stub for role-thematic tables & FineDB real-time permission tables
 const configs = new Map();
 const nodesByRole = new Map();
-const roleReports = new Map([
-  ['role-1', [
-    { report_id: 'rep-bi-1', report_name: '库存总览', catalog_name: '库存总览', report_type: 'bi' },
-    { report_id: 'rep-cpt-1', report_name: '仓储成本明细', catalog_name: '仓储成本明细', report_type: 'cpt' },
-    { report_id: 'rep-unauth', report_name: '未授权报表', catalog_name: '未授权报表', report_type: 'cpt' },
-  ]],
-  ['role-2', [
-    { report_id: 'rep-frm-1', report_name: '经营填报', catalog_name: '经营填报', report_type: 'frm' },
-  ]],
-]);
-// User alice has two roles stored as JSON array string in dim_bi_user.role_id
-const userRolesMap = new Map([['alice', ['["role-1","role-2"]']]]);
 
+// Simulated FineDB tables: fine_user, fine_user_role_middle, fine_authority_object, fine_authority
+const fineUsers = [
+  { id: 'u-alice', username: 'alice' },
+];
+const fineUserRoleMiddle = [
+  { userid: 'u-alice', roleid: 'role-1', roletype: 2 },
+  { userid: 'u-alice', roleid: 'role-2', roletype: 2 },
+  { userid: 'u-alice', roleid: 'dep-role-ignored', roletype: 1 },
+];
+const fineAuthorityObjects = [
+  { id: 'decision-directory-root', parentid: null, displayname: '目录根', expandtype: 3, path: null },
+  { id: 'decision-mgmt', parentid: null, displayname: '管理系统', expandtype: 1, path: null },
+  { id: 'dir-supply', parentid: 'decision-directory-root', displayname: '供应链目录', expandtype: 3, path: null },
+  { id: 'dir-supply-sub', parentid: 'dir-supply', displayname: '仓储子目录', expandtype: 3, path: null },
+  { id: 'dir-denied', parentid: 'dir-supply', displayname: '禁止子目录', expandtype: 3, path: null },
+  { id: 'rep-bi-1', parentid: 'dir-supply-sub', displayname: '库存总览', expandtype: 201, path: 'bi/stock' },
+  { id: 'rep-cpt-1', parentid: 'dir-supply-sub', displayname: '仓储成本明细', expandtype: 102, path: 'stock/cost.cpt' },
+  { id: 'rep-denied-leaf', parentid: 'dir-supply-sub', displayname: '显式拒绝报表', expandtype: 102, path: 'stock/secret.cpt' },
+  { id: 'rep-under-denied-dir', parentid: 'dir-denied', displayname: '禁止目录下继承拒绝报表', expandtype: 102, path: 'stock/hidden.cpt' },
+  { id: 'rep-unauth', parentid: 'dir-denied', displayname: '未授权报表', expandtype: 102, path: 'stock/reallowed.cpt' },
+  { id: 'rep-frm-1', parentid: 'decision-directory-root', displayname: '经营填报', expandtype: 102, path: 'ops/input.frm' },
+];
+const fineAuthorities = [
+  // role-1: allowed on dir-supply (inherits rep-bi-1, rep-cpt-1), explicitly denied on rep-denied-leaf & dir-denied, re-allowed on rep-unauth
+  { roleid: 'role-1', authorityentityid: 'dir-supply', authoritytype: 1, authority: 2 },
+  { roleid: 'role-1', authorityentityid: 'rep-denied-leaf', authoritytype: 102, authority: 1 },
+  { roleid: 'role-1', authorityentityid: 'dir-denied', authoritytype: 1, authority: 1 },
+  { roleid: 'role-1', authorityentityid: 'rep-unauth', authoritytype: 102, authority: 2 },
+  // role-2: direct allow on rep-frm-1
+  { roleid: 'role-2', authorityentityid: 'rep-frm-1', authoritytype: 102, authority: 2 },
+];
+
+// Evaluates the exact same recursive CTE semantics as availableReportsForRole SQL
+function evalFineDbRoleReports(roleId) {
+  const directAuth = new Map();
+  for (const fa of fineAuthorities) {
+    if (fa.roleid !== roleId || ![1, 102, 206].includes(fa.authoritytype) || ![1, 2].includes(fa.authority)) continue;
+    const prev = directAuth.get(fa.authorityentityid);
+    directAuth.set(fa.authorityentityid, prev === undefined ? fa.authority : Math.min(prev, fa.authority));
+  }
+  const byParent = new Map();
+  for (const obj of fineAuthorityObjects) {
+    const list = byParent.get(obj.parentid ?? null) || [];
+    list.push(obj);
+    byParent.set(obj.parentid ?? null, list);
+  }
+  const reached = new Map();
+  const queue = [];
+  for (const obj of fineAuthorityObjects) {
+    if (directAuth.get(obj.id) === 2 && ![1, 2].includes(obj.expandtype ?? 0)) {
+      queue.push({ obj, depth: 0, visited: new Set([obj.id]) });
+    }
+  }
+  while (queue.length) {
+    const { obj, depth, visited } = queue.shift();
+    if (!reached.has(obj.id)) reached.set(obj.id, obj);
+    if (depth >= 32) continue;
+    for (const child of byParent.get(obj.id) || []) {
+      if (directAuth.has(child.id)) continue; // da.direct_auth IS NULL
+      if ([1, 2].includes(child.expandtype ?? 0)) continue;
+      if (visited.has(child.id)) continue;
+      const nextVisited = new Set(visited);
+      nextVisited.add(child.id);
+      queue.push({ obj: child, depth: depth + 1, visited: nextVisited });
+    }
+  }
+  return [...reached.values()]
+    .filter(o => o.id && !o.id.includes('decision') && o.expandtype !== null && ![1, 2, 3].includes(o.expandtype))
+    .map(o => ({
+      report_id: o.id,
+      report_name: o.displayname,
+      catalog_name: o.displayname,
+      expand_type: o.expandtype,
+      object_path: o.path,
+      report_type: null,
+    }));
+}
+
+let lastRoleReportSql = '';
+let lastUserRolesSql = '';
 const db = {
   async query(sql, params = []) {
     if (sql.includes('SELECT 1')) return { rows: [{ '?column?': 1 }] };
     if (sql.includes('max(day_id)')) return { rows: [{ day: '2026-11-19' }] };
     if (sql.includes('FROM fr_quick_entry_app')) return { rows: [] };
-    if (sql.includes('FROM dim_bi_user u') && sql.includes('role_id')) {
-      return { rows: (userRolesMap.get(params[0]) || []).map(role_id => ({ role_id })) };
+    if (sql.includes('/* portal: finedb user roles */')) {
+      lastUserRolesSql = sql;
+      const user = fineUsers.find(u => u.username === params[0]);
+      if (!user) return { rows: [] };
+      const roleIds = [...new Set(fineUserRoleMiddle
+        .filter(m => m.userid === user.id && m.roletype === 2)
+        .map(m => m.roleid))].sort();
+      return { rows: roleIds.map(role_id => ({ role_id })) };
+    }
+    if (sql.includes('/* portal: finedb role reports */')) {
+      lastRoleReportSql = sql;
+      return { rows: evalFineDbRoleReports(params[0]) };
     }
     if (sql.includes('FROM portal_role_thematic_config c') && sql.includes('GROUP BY c.role_id')) {
       const ids = params[0] || [];
@@ -116,7 +214,10 @@ const db = {
       const ids = new Set(params[0] || []);
       const rows = [];
       for (const cfg of [...configs.values()].filter(c => ids.has(c.role_id)).sort((a, b) => a.role_name.localeCompare(b.role_name))) {
-        const avail = new Map((roleReports.get(cfg.role_id) || []).map(r => [r.report_id, r]));
+        const avail = new Map(evalFineDbRoleReports(cfg.role_id).map(r => [r.report_id, {
+          ...r,
+          report_type: inferReportTypeFromAuthorityObject(r.expand_type, r.object_path, r.report_type),
+        }]));
         const enabledNodes = (nodesByRole.get(cfg.role_id) || []).filter(n => n.is_enabled);
         if (!enabledNodes.length) {
           rows.push({
@@ -140,31 +241,18 @@ const db = {
       const cfg = configs.get(params[0]);
       return { rows: cfg ? [cfg] : [] };
     }
-    if (sql.includes('FROM portal_role_thematic_node n') && sql.includes('ANY($1::text[])')) {
-      const ids = params[0] || [];
-      const rows = [];
-      for (const id of ids) {
-        const avail = new Map((roleReports.get(id) || []).map(r => [r.report_id, r]));
-        for (const n of nodesByRole.get(id) || []) {
-          if (!n.is_enabled) continue;
-          const r = n.report_id ? avail.get(n.report_id) : null;
-          rows.push({ ...n, catalog_name: r?.catalog_name || null, report_type: r?.report_type || null });
-        }
-      }
-      return { rows };
-    }
     if (sql.includes('FROM portal_role_thematic_node n') && sql.includes('WHERE n.role_id = $1')) {
       const id = params[0];
-      const avail = new Map((roleReports.get(id) || []).map(r => [r.report_id, r]));
+      const avail = new Map(evalFineDbRoleReports(id).map(r => [r.report_id, {
+        ...r,
+        report_type: inferReportTypeFromAuthorityObject(r.expand_type, r.object_path, r.report_type),
+      }]));
       return {
         rows: (nodesByRole.get(id) || []).map(n => {
           const r = n.report_id ? avail.get(n.report_id) : null;
           return { ...n, catalog_name: r?.catalog_name || null, report_type: r?.report_type || null };
         }),
       };
-    }
-    if (sql.includes('FROM dim_bi_role_report_rel rel')) {
-      return { rows: roleReports.get(params[0]) || [] };
     }
     if (sql.includes('INSERT INTO portal_role_thematic_config')) {
       configs.set(params[0], {
@@ -198,6 +286,24 @@ const db = {
   },
   async end() {},
 };
+
+// Direct unit checks for FineDB SQL generation and recursive inheritance / deny filtering
+const directUserRoles = await userRoleIds(db, 'alice');
+assert.deepEqual(directUserRoles, ['role-1', 'role-2']);
+assert(lastUserRolesSql.includes('finedb.fine_user_role_middle'));
+assert(lastUserRolesSql.includes('finedb.fine_user'));
+assert(lastUserRolesSql.includes('urm.roletype = 2'));
+
+const role1Reports = await availableReportsForRole(db, 'role-1');
+assert.deepEqual(
+  role1Reports.map(r => [r.reportId, r.reportType]).sort(),
+  [['rep-bi-1', 'bi'], ['rep-cpt-1', 'cpt'], ['rep-unauth', 'cpt']],
+);
+assert(lastRoleReportSql.includes('WITH RECURSIVE direct_auth'));
+assert(lastRoleReportSql.includes('finedb.fine_authority'));
+assert(lastRoleReportSql.includes('finedb.fine_authority_object'));
+assert(lastRoleReportSql.includes("NOT LIKE '%decision%'"));
+assert(lastRoleReportSql.includes('NOT IN (1, 2, 3)'));
 
 let app;
 try {

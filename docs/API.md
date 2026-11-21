@@ -73,7 +73,7 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 | 请求 | 参数 | 说明 |
 | --- | --- | --- |
 | `GET /role-thematic/roles` | `page=1`, `pageSize=15` (1–50), `q` | 代理帆软 `/v10/roles`（附加 `privilegeType=2` 与时间戳 `_`），平铺分页返回角色及已配置统计 |
-| `GET /role-thematic/roles/:roleId` | `roleName` (可选检索提示) | 返回该角色的配置主信息（`role`）、已有目录报表树（`nodes`）及底表 `dim_bi_role_report_rel` LEFT JOIN `dim_bi_report_info_dtl` 的可配置报表（`availableReports`） |
+| `GET /role-thematic/roles/:roleId` | `roleName` (可选检索提示) | 返回该角色的配置主信息（`role`）、已有目录报表树（`nodes`）及实时递归解析 `finedb.fine_authority` / `finedb.fine_authority_object`（并 LEFT JOIN `dim_bi_report_info_dtl`）得到的可配置报表（`availableReports`） |
 | `POST /role-thematic/roles/:roleId/tree` | JSON: `{roleName?, nodes: [...]}` | 校验同源 Origin、角色管理权限、树结构合法性（无环、深度≤10、同角色报表不重复、报表属于该角色底表）后，在单个数据库事务内保存配置并返回最新详情 |
 
 `Entry.type` 枚举：`folder | bi | fvs | frm | cpt | url`。`iconUrl` 可选，提供 HTTPS 图片地址。`url` 类型必须提供 `url`。图标请求失败使用类型默认切图。`sort` 数值升序，事业群默认选择根目录下排序第一的文件夹；目录为空显示空态，不伪造事业群。

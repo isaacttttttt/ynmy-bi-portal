@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { serialize } from 'node:v8';
 import { ApiError, cookieToken, publicUrl } from './http.js';
 import { createTtlCache } from './ttl-cache.js';
-import { parseUserRoleIds } from './role-thematic-repository.js';
 
 const upstreamError = () => new ApiError(502, 'PLATFORM_UNAVAILABLE', '帆软平台暂时不可用，请重试');
 const validId = value => typeof value === 'string' && /^[\w.:-]{1,128}$/.test(value);
@@ -60,7 +59,7 @@ export function platformClient(env = process.env, db) {
   const identityCache = createTtlCache({ ttlMs: identityTtlMs, maxEntries: 5000 });
   const roleListCache = createTtlCache({ ttlMs: rolesTtlMs, maxEntries: 2000 });
   let cachedBytes = 0;
-  let userQueryMode = 'full';
+  let userQueryMode = 'dept';
 
   async function call(token, path, method = 'GET', log, operation) {
     const started = Date.now();
@@ -152,11 +151,9 @@ export function platformClient(env = process.env, db) {
 
   async function queryTrustedUserRows(identity) {
     const run = async mode => {
-      const cols = mode === 'full'
-        ? 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name, oa_dept_code AS "oaDeptCode", role_id AS "roleId"'
-        : mode === 'dept'
-          ? 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name, oa_dept_code AS "oaDeptCode"'
-          : 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name';
+      const cols = mode === 'dept'
+        ? 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name, oa_dept_code AS "oaDeptCode"'
+        : 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name';
       const { rows } = await db.query(
         `SELECT DISTINCT ${cols}
          FROM dim_bi_user WHERE id=ANY($1::text[]) AND enable='true'
@@ -165,7 +162,7 @@ export function platformClient(env = process.env, db) {
       );
       return { rows, mode };
     };
-    const modes = userQueryMode === 'full' ? ['full', 'dept', 'basic'] : userQueryMode === 'dept' ? ['dept', 'basic'] : ['basic'];
+    const modes = userQueryMode === 'dept' ? ['dept', 'basic'] : ['basic'];
     for (let i = 0; i < modes.length; i++) {
       try {
         const res = await run(modes[i]);
@@ -191,17 +188,11 @@ export function platformClient(env = process.env, db) {
       log?.info({ stage: 'identity', mode: identityMode, candidateCount: identity.ids.length }, 'identity parsed');
       const { rows, mode } = await queryTrustedUserRows(identity);
       const distinctUsers = new Map();
-      const rawRoles = [];
       const deptCodes = new Set();
-      let hasRoleColumn = false;
       let hasDeptColumn = false;
       for (const row of rows) {
         if (!row || typeof row.userName !== 'string' || !row.userName) continue;
         if (!distinctUsers.has(row.userName)) distinctUsers.set(row.userName, row.name);
-        if (Object.hasOwn(row, 'roleId')) {
-          hasRoleColumn = true;
-          if (row.roleId !== null && row.roleId !== undefined) rawRoles.push(row.roleId);
-        }
         if (Object.hasOwn(row, 'oaDeptCode')) {
           hasDeptColumn = true;
           if (typeof row.oaDeptCode === 'string' && row.oaDeptCode.trim()) deptCodes.add(row.oaDeptCode.trim());
@@ -214,7 +205,6 @@ export function platformClient(env = process.env, db) {
       return {
         userName,
         name,
-        ...(mode === 'full' && hasRoleColumn ? { roleIds: parseUserRoleIds(rawRoles) } : {}),
         ...(mode !== 'basic' && hasDeptColumn ? { oaDeptCodes: [...deptCodes] } : {}),
       };
     };

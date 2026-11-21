@@ -129,24 +129,25 @@ grep '请求ID' logs/portal.log
 使用客户现有 PostgreSQL，表位于 `public` schema：
 
 - `dim_bi_report_info_dtl`、`dim_bi_report_dictionary`
-- `dim_bi_user`（含 `role_id`）、`dim_dept_mapping`、`dim_bi_visit_log`
-- `dim_bi_role_report_rel`（角色-报表可配置底表，可通过 `DB_ROLE_REPORT_TABLE` 调整表名）
+- `dim_bi_user`、`dim_dept_mapping`、`dim_bi_visit_log`
 - `fr_index_noticement`、`fr_quick_entry_app`
 - `portal_search_history`、`portal_role_thematic_config`、`portal_role_thematic_node`
+- 同实例 `finedb` schema（可通过 `FINEDB_SCHEMA` 调整）：`fine_user`、`fine_user_role_middle`、`fine_authority`、`fine_authority_object`（用于实时查询用户所属角色及角色可配置报表，支持上级目录递归继承与显式拒绝覆盖）
 
-`report_lifecycle` 不使用。公告部门关联为 `dim_bi_user.oa_dept_code = dim_dept_mapping.dept_job_id`，使用映射后的部门名匹配公告授权部门。专题分析关联为 `dim_bi_user.role_id` → `portal_role_thematic_config` / `portal_role_thematic_node`。
+`report_lifecycle` 不使用。公告部门关联为 `dim_bi_user.oa_dept_code = dim_dept_mapping.dept_job_id`，使用映射后的部门名匹配公告授权部门。专题分析关联为 `finedb.fine_user` + `finedb.fine_user_role_middle`（`roletype = 2`）→ `portal_role_thematic_config` / `portal_role_thematic_node`。
 
 由数据库管理员按实际库名、账号执行交付包 `sql/003-search-history.sql`、`sql/004-source-indexes.sql` 和 `sql/007-role-thematic-mapping.sql`；不要执行示例库的 `001-portal.sql`。大表索引应在客户维护窗口创建。
 
-运行账号只需业务表 SELECT，以及 `portal_search_history`、`portal_role_thematic_config`、`portal_role_thematic_node` 的 SELECT、INSERT、UPDATE、DELETE。数据库管理员可参考：
+运行账号只需业务表及 `finedb` 权限底表 SELECT，以及 `portal_search_history`、`portal_role_thematic_config`、`portal_role_thematic_node` 的 SELECT、INSERT、UPDATE、DELETE。数据库管理员可参考：
 
 ```sql
 GRANT CONNECT ON DATABASE bi_portal TO portal_reader;
-GRANT USAGE ON SCHEMA public TO portal_reader;
+GRANT USAGE ON SCHEMA public, finedb TO portal_reader;
 GRANT SELECT ON public.dim_bi_report_info_dtl, public.dim_bi_report_dictionary,
   public.dim_bi_user, public.dim_dept_mapping, public.dim_bi_visit_log,
-  public.dim_bi_role_report_rel,
   public.fr_index_noticement, public.fr_quick_entry_app TO portal_reader;
+GRANT SELECT ON finedb.fine_user, finedb.fine_user_role_middle,
+  finedb.fine_authority, finedb.fine_authority_object TO portal_reader;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.portal_search_history,
   public.portal_role_thematic_config, public.portal_role_thematic_node TO portal_reader;
 ```
