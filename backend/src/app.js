@@ -29,11 +29,13 @@ export async function buildApp({ platform, db = createPool() } = {}) {
   const { reportsFor, noticesFor, quickEntries, bootstrapDate } = sourceRepository;
   const thematicCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.PORTAL_THEMATIC_CACHE_TTL_SECONDS, 60, 'PORTAL_THEMATIC_CACHE_TTL_SECONDS'), maxEntries: 2000 });
   const catalogCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.PORTAL_CATALOG_CACHE_TTL_SECONDS, 60, 'PORTAL_CATALOG_CACHE_TTL_SECONDS'), maxEntries: 32 });
+  const userRolesCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.FINEDB_USER_ROLES_CACHE_TTL_SECONDS, 30, 'FINEDB_USER_ROLES_CACHE_TTL_SECONDS'), maxEntries: 5000 });
+  const fineObjectTreeCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.FINEDB_OBJECT_TREE_CACHE_TTL_SECONDS, 30, 'FINEDB_OBJECT_TREE_CACHE_TTL_SECONDS'), maxEntries: 4 });
   const stream = logStream(process.env.PORTAL_LOG_FILE);
   const app = Fastify({ logger: { level: 'info', stream, redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers.set-cookie'] },
     disableRequestLogging: true, genReqId: () => randomUUID(), requestIdHeader: false,
     bodyLimit: 524288, requestTimeout: 15000, ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
-  app.addHook('onClose', () => { thematicCache.clear(); catalogCache.clear(); return db.end(); });
+  app.addHook('onClose', () => { thematicCache.clear(); catalogCache.clear(); userRolesCache.clear(); fineObjectTreeCache.clear(); return db.end(); });
   app.addHook('onClose', async () => { platform.close?.(); });
   if (stream) app.addHook('onClose', async () => { stream.end(); await finished(stream); });
   app.addHook('onRequest', async request => {
@@ -77,7 +79,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
         platform.favorites(context),
         quickEntries(db, { cache: catalogCache, log: request.log }),
         bootstrapDate(db, request.log, { cache: catalogCache }),
-        thematicRolesFor(db, context, { cache: thematicCache }),
+        thematicRolesFor(db, context, { cache: thematicCache, userRolesCache }),
       ]);
       const tree = rootId && context.ids.has(rootId) ? context.entries.filter(e => e.id === rootId).concat(descendants(context.entries, rootId)) : [];
       return { success: true, data: { user: { name: context.user.name }, rootId, entries: tree, thematicRoles, favoriteIds, quickEntries: links, dataAsOf: asOf, platform: platform.browser } };
@@ -156,12 +158,18 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       };
     });
     api.get('/role-thematic/roles/:roleId', { config: { needTree: false } }, async request => {
-      if (Object.keys(request.query).some(key => key !== 'roleName')) throw invalid();
+      if (Object.keys(request.query).some(key => key !== 'roleName' && key !== 'refresh')) throw invalid();
       const roleNameHint = request.query.roleName ?? '';
       if (typeof roleNameHint !== 'string' || roleNameHint.length > 256) throw invalid();
+      const refreshRaw = request.query.refresh;
+      if (refreshRaw !== undefined && refreshRaw !== '1' && refreshRaw !== '0' && refreshRaw !== 'true' && refreshRaw !== 'false') throw invalid();
+      const forceRefresh = refreshRaw === '1' || refreshRaw === 'true';
       if (typeof platform.verifyRoleAccess !== 'function') throw new ApiError(501, 'NOT_SUPPORTED', '当前平台客户端未启用角色校验');
       const verifiedRole = await platform.verifyRoleAccess(request.portal, request.params.roleId, roleNameHint.trim());
-      return { success: true, data: await roleThematicDetail(db, verifiedRole) };
+      return {
+        success: true,
+        data: await roleThematicDetail(db, verifiedRole, { objectTreeCache: fineObjectTreeCache, forceRefresh, log: request.log }),
+      };
     });
     api.post('/role-thematic/roles/:roleId/tree', {
       config: { needTree: false },
@@ -204,6 +212,8 @@ export async function buildApp({ platform, db = createPool() } = {}) {
           userName: request.portal.user.userName,
           nodes: request.body.nodes,
           cache: thematicCache,
+          objectTreeCache: fineObjectTreeCache,
+          log: request.log,
         }),
       };
     });

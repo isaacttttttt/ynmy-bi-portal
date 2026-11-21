@@ -4,9 +4,11 @@ import { platformClient } from '../src/platform.js';
 import { buildApp } from '../src/app.js';
 import {
   availableReportsForRole,
+  buildAuthorityObjectIndex,
   fineDbSchema,
   inferReportTypeFromAuthorityObject,
   parseUserRoleIds,
+  resolveAllowedReportsFromTree,
   userRoleIds,
 } from '../src/role-thematic-repository.js';
 
@@ -97,7 +99,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const configs = new Map();
 const nodesByRole = new Map();
 
-// Simulated FineDB tables: fine_user, fine_user_role_middle, fine_authority_object, fine_authority
+// Simulated FineDB tables: fine_user, fine_user_role_middle, fine_custom_role, fine_authority_object, fine_authority
 const fineUsers = [
   { id: 'u-alice', username: 'alice' },
 ];
@@ -106,18 +108,22 @@ const fineUserRoleMiddle = [
   { userid: 'u-alice', roleid: 'role-2', roletype: 2 },
   { userid: 'u-alice', roleid: 'dep-role-ignored', roletype: 1 },
 ];
+const fineCustomRoles = new Map([
+  ['role-1', '供应链分析角色(实时名)'],
+  ['role-2', '健康品经营角色'],
+]);
 const fineAuthorityObjects = [
-  { id: 'decision-directory-root', parentid: null, displayname: '目录根', expandtype: 3, path: null },
-  { id: 'decision-mgmt', parentid: null, displayname: '管理系统', expandtype: 1, path: null },
-  { id: 'dir-supply', parentid: 'decision-directory-root', displayname: '供应链目录', expandtype: 3, path: null },
-  { id: 'dir-supply-sub', parentid: 'dir-supply', displayname: '仓储子目录', expandtype: 3, path: null },
-  { id: 'dir-denied', parentid: 'dir-supply', displayname: '禁止子目录', expandtype: 3, path: null },
-  { id: 'rep-bi-1', parentid: 'dir-supply-sub', displayname: '库存总览', expandtype: 201, path: 'bi/stock' },
-  { id: 'rep-cpt-1', parentid: 'dir-supply-sub', displayname: '仓储成本明细', expandtype: 102, path: 'stock/cost.cpt' },
-  { id: 'rep-denied-leaf', parentid: 'dir-supply-sub', displayname: '显式拒绝报表', expandtype: 102, path: 'stock/secret.cpt' },
-  { id: 'rep-under-denied-dir', parentid: 'dir-denied', displayname: '禁止目录下继承拒绝报表', expandtype: 102, path: 'stock/hidden.cpt' },
-  { id: 'rep-unauth', parentid: 'dir-denied', displayname: '未授权报表', expandtype: 102, path: 'stock/reallowed.cpt' },
-  { id: 'rep-frm-1', parentid: 'decision-directory-root', displayname: '经营填报', expandtype: 102, path: 'ops/input.frm' },
+  { id: 'decision-directory-root', parent_id: null, display_name: '目录根', expand_type: 3, object_path: null, catalog_name: null, report_type: null },
+  { id: 'decision-mgmt', parent_id: null, display_name: '管理系统', expand_type: 1, object_path: null, catalog_name: null, report_type: null },
+  { id: 'dir-supply', parent_id: 'decision-directory-root', display_name: '供应链目录', expand_type: 3, object_path: null, catalog_name: null, report_type: null },
+  { id: 'dir-supply-sub', parent_id: 'dir-supply', display_name: '仓储子目录', expand_type: 3, object_path: null, catalog_name: null, report_type: null },
+  { id: 'dir-denied', parent_id: 'dir-supply', display_name: '禁止子目录', expand_type: 3, object_path: null, catalog_name: null, report_type: null },
+  { id: 'rep-bi-1', parent_id: 'dir-supply-sub', display_name: '库存总览', expand_type: 201, object_path: 'bi/stock', catalog_name: '库存总览', report_type: 'bi' },
+  { id: 'rep-cpt-1', parent_id: 'dir-supply-sub', display_name: '仓储成本明细', expand_type: 102, object_path: 'stock/cost.cpt', catalog_name: '仓储成本明细', report_type: 'cpt' },
+  { id: 'rep-denied-leaf', parent_id: 'dir-supply-sub', display_name: '显式拒绝报表', expand_type: 102, object_path: 'stock/secret.cpt', catalog_name: null, report_type: null },
+  { id: 'rep-under-denied-dir', parent_id: 'dir-denied', display_name: '禁止目录下继承拒绝报表', expand_type: 102, object_path: 'stock/hidden.cpt', catalog_name: null, report_type: null },
+  { id: 'rep-unauth', parent_id: 'dir-denied', display_name: '未授权报表', expand_type: 102, object_path: 'stock/reallowed.cpt', catalog_name: '未授权报表', report_type: 'cpt' },
+  { id: 'rep-frm-1', parent_id: 'decision-directory-root', display_name: '经营填报', expand_type: 102, object_path: 'ops/input.frm', catalog_name: '经营填报', report_type: 'frm' },
 ];
 const fineAuthorities = [
   // role-1: allowed on dir-supply (inherits rep-bi-1, rep-cpt-1), explicitly denied on rep-denied-leaf & dir-denied, re-allowed on rep-unauth
@@ -129,54 +135,22 @@ const fineAuthorities = [
   { roleid: 'role-2', authorityentityid: 'rep-frm-1', authoritytype: 102, authority: 2 },
 ];
 
-// Evaluates the exact same recursive CTE semantics as availableReportsForRole SQL
-function evalFineDbRoleReports(roleId) {
-  const directAuth = new Map();
+function directAuthRowsForRole(roleId) {
+  const byObj = new Map();
   for (const fa of fineAuthorities) {
     if (fa.roleid !== roleId || ![1, 102, 206].includes(fa.authoritytype) || ![1, 2].includes(fa.authority)) continue;
-    const prev = directAuth.get(fa.authorityentityid);
-    directAuth.set(fa.authorityentityid, prev === undefined ? fa.authority : Math.min(prev, fa.authority));
+    const prev = byObj.get(fa.authorityentityid);
+    byObj.set(fa.authorityentityid, prev === undefined ? fa.authority : Math.min(prev, fa.authority));
   }
-  const byParent = new Map();
-  for (const obj of fineAuthorityObjects) {
-    const list = byParent.get(obj.parentid ?? null) || [];
-    list.push(obj);
-    byParent.set(obj.parentid ?? null, list);
-  }
-  const reached = new Map();
-  const queue = [];
-  for (const obj of fineAuthorityObjects) {
-    if (directAuth.get(obj.id) === 2 && ![1, 2].includes(obj.expandtype ?? 0)) {
-      queue.push({ obj, depth: 0, visited: new Set([obj.id]) });
-    }
-  }
-  while (queue.length) {
-    const { obj, depth, visited } = queue.shift();
-    if (!reached.has(obj.id)) reached.set(obj.id, obj);
-    if (depth >= 32) continue;
-    for (const child of byParent.get(obj.id) || []) {
-      if (directAuth.has(child.id)) continue; // da.direct_auth IS NULL
-      if ([1, 2].includes(child.expandtype ?? 0)) continue;
-      if (visited.has(child.id)) continue;
-      const nextVisited = new Set(visited);
-      nextVisited.add(child.id);
-      queue.push({ obj: child, depth: depth + 1, visited: nextVisited });
-    }
-  }
-  return [...reached.values()]
-    .filter(o => o.id && !o.id.includes('decision') && o.expandtype !== null && ![1, 2, 3].includes(o.expandtype))
-    .map(o => ({
-      report_id: o.id,
-      report_name: o.displayname,
-      catalog_name: o.displayname,
-      expand_type: o.expandtype,
-      object_path: o.path,
-      report_type: null,
-    }));
+  return [...byObj.entries()].map(([object_id, direct_auth]) => ({ object_id, direct_auth }));
 }
 
-let lastRoleReportSql = '';
+let lastObjectTreeSql = '';
+let lastDirectAuthSql = '';
 let lastUserRolesSql = '';
+let objectTreeQueries = 0;
+let directAuthQueries = 0;
+let userRolesQueries = 0;
 const db = {
   async query(sql, params = []) {
     if (sql.includes('SELECT 1')) return { rows: [{ '?column?': 1 }] };
@@ -184,6 +158,7 @@ const db = {
     if (sql.includes('FROM fr_quick_entry_app')) return { rows: [] };
     if (sql.includes('/* portal: finedb user roles */')) {
       lastUserRolesSql = sql;
+      userRolesQueries++;
       const user = fineUsers.find(u => u.username === params[0]);
       if (!user) return { rows: [] };
       const roleIds = [...new Set(fineUserRoleMiddle
@@ -191,9 +166,15 @@ const db = {
         .map(m => m.roleid))].sort();
       return { rows: roleIds.map(role_id => ({ role_id })) };
     }
-    if (sql.includes('/* portal: finedb role reports */')) {
-      lastRoleReportSql = sql;
-      return { rows: evalFineDbRoleReports(params[0]) };
+    if (sql.includes('/* portal: finedb authority object tree */')) {
+      lastObjectTreeSql = sql;
+      objectTreeQueries++;
+      return { rows: fineAuthorityObjects.filter(o => ![1, 2].includes(o.expand_type ?? 0)) };
+    }
+    if (sql.includes('/* portal: finedb role direct authority */')) {
+      lastDirectAuthSql = sql;
+      directAuthQueries++;
+      return { rows: directAuthRowsForRole(params[0]) };
     }
     if (sql.includes('FROM portal_role_thematic_config c') && sql.includes('GROUP BY c.role_id')) {
       const ids = params[0] || [];
@@ -212,16 +193,15 @@ const db = {
     if (sql.includes('/* portal: role thematic tree */')) {
       thematicTreeQueries++;
       const ids = new Set(params[0] || []);
+      const tree = buildAuthorityObjectIndex(fineAuthorityObjects);
       const rows = [];
       for (const cfg of [...configs.values()].filter(c => ids.has(c.role_id)).sort((a, b) => a.role_name.localeCompare(b.role_name))) {
-        const avail = new Map(evalFineDbRoleReports(cfg.role_id).map(r => [r.report_id, {
-          ...r,
-          report_type: inferReportTypeFromAuthorityObject(r.expand_type, r.object_path, r.report_type),
-        }]));
+        const liveRoleName = fineCustomRoles.get(cfg.role_id) || cfg.role_name;
+        const avail = new Map(resolveAllowedReportsFromTree(tree, directAuthRowsForRole(cfg.role_id)).map(r => [r.reportId, r]));
         const enabledNodes = (nodesByRole.get(cfg.role_id) || []).filter(n => n.is_enabled);
         if (!enabledNodes.length) {
           rows.push({
-            role_id: cfg.role_id, role_name: cfg.role_name,
+            role_id: cfg.role_id, role_name: liveRoleName,
             node_id: null, parent_node_id: null, node_type: null, report_id: null,
             node_name: null, sort_no: null, catalog_name: null, report_type: null,
           });
@@ -229,8 +209,8 @@ const db = {
           for (const n of enabledNodes) {
             const r = n.report_id ? avail.get(n.report_id) : null;
             rows.push({
-              role_id: cfg.role_id, role_name: cfg.role_name,
-              ...n, catalog_name: r?.catalog_name || null, report_type: r?.report_type || null,
+              role_id: cfg.role_id, role_name: liveRoleName,
+              ...n, catalog_name: r?.catalogName || null, report_type: r?.reportType || null,
             });
           }
         }
@@ -243,14 +223,12 @@ const db = {
     }
     if (sql.includes('FROM portal_role_thematic_node n') && sql.includes('WHERE n.role_id = $1')) {
       const id = params[0];
-      const avail = new Map(evalFineDbRoleReports(id).map(r => [r.report_id, {
-        ...r,
-        report_type: inferReportTypeFromAuthorityObject(r.expand_type, r.object_path, r.report_type),
-      }]));
+      const tree = buildAuthorityObjectIndex(fineAuthorityObjects);
+      const avail = new Map(resolveAllowedReportsFromTree(tree, directAuthRowsForRole(id)).map(r => [r.reportId, r]));
       return {
         rows: (nodesByRole.get(id) || []).map(n => {
           const r = n.report_id ? avail.get(n.report_id) : null;
-          return { ...n, catalog_name: r?.catalog_name || null, report_type: r?.report_type || null };
+          return { ...n, catalog_name: r?.catalogName || null, report_type: r?.reportType || null };
         }),
       };
     }
@@ -287,7 +265,7 @@ const db = {
   async end() {},
 };
 
-// Direct unit checks for FineDB SQL generation and recursive inheritance / deny filtering
+// Direct unit checks for FineDB SQL generation and in-memory BFS inheritance / deny filtering (zero PG WITH RECURSIVE!)
 const directUserRoles = await userRoleIds(db, 'alice');
 assert.deepEqual(directUserRoles, ['role-1', 'role-2']);
 assert(lastUserRolesSql.includes('finedb.fine_user_role_middle'));
@@ -299,11 +277,10 @@ assert.deepEqual(
   role1Reports.map(r => [r.reportId, r.reportType]).sort(),
   [['rep-bi-1', 'bi'], ['rep-cpt-1', 'cpt'], ['rep-unauth', 'cpt']],
 );
-assert(lastRoleReportSql.includes('WITH RECURSIVE direct_auth'));
-assert(lastRoleReportSql.includes('finedb.fine_authority'));
-assert(lastRoleReportSql.includes('finedb.fine_authority_object'));
-assert(lastRoleReportSql.includes("NOT LIKE '%decision%'"));
-assert(lastRoleReportSql.includes('NOT IN (1, 2, 3)'));
+assert(!lastObjectTreeSql.includes('WITH RECURSIVE'), 'Object tree load must not run recursive CTE in PG');
+assert(lastObjectTreeSql.includes('finedb.fine_authority_object'));
+assert(lastDirectAuthSql.includes('finedb.fine_authority'));
+assert(!lastDirectAuthSql.includes('WITH RECURSIVE'), 'Direct authority query must be a flat single-table lookup');
 
 let app;
 try {
@@ -352,11 +329,24 @@ try {
   const forbiddenRole = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles/role-not-granted', headers: { cookie } });
   assert.equal(forbiddenRole.statusCode, 403);
 
-  // 4. Read detail for role-1 (empty tree + 3 available reports from dim_bi_role_report_rel)
+  // 4. Read detail for role-1 (empty tree + 3 available reports; object tree cached, direct auth real-time, ?refresh=1 forces tree reload)
+  const treeQueriesBefore = objectTreeQueries;
+  const authQueriesBefore = directAuthQueries;
   const detailBefore = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles/role-1', headers: { cookie } });
   assert.equal(detailBefore.statusCode, 200, detailBefore.body);
   assert.equal(detailBefore.json().data.nodes.length, 0);
   assert.equal(detailBefore.json().data.availableReports.length, 3);
+  assert.equal(objectTreeQueries, treeQueriesBefore + 1);
+  assert.equal(directAuthQueries, authQueriesBefore + 1);
+
+  const detailCachedTree = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles/role-1', headers: { cookie } });
+  assert.equal(detailCachedTree.statusCode, 200);
+  assert.equal(objectTreeQueries, treeQueriesBefore + 1, 'Global fine_authority_object tree hits hot cache');
+  assert.equal(directAuthQueries, authQueriesBefore + 2, 'Role fine_authority remains real-time per request');
+
+  const detailRefreshed = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles/role-1?refresh=1', headers: { cookie } });
+  assert.equal(detailRefreshed.statusCode, 200);
+  assert.equal(objectTreeQueries, treeQueriesBefore + 2, '?refresh=1 bypasses and reloads object tree hot cache');
 
   // 5. CSRF check on save
   const badOrigin = await app.inject({
@@ -415,8 +405,9 @@ try {
   });
   assert.equal(save2.statusCode, 200, save2.body);
 
-  // 8. Verify /bootstrap returns both configured roles via dim_bi_user.role_id,
+  // 8. Verify /bootstrap returns both configured roles via finedb.fine_user_role_middle + live fine_custom_role name,
   //    excludes disabled folders + their children, intersects reports with FineBI tree, and enriches BI templateId!
+  const userRolesQueriesBefore = userRolesQueries;
   const bootstrapRes = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: { cookie } });
   assert.equal(bootstrapRes.statusCode, 200, bootstrapRes.body);
   const { thematicRoles } = bootstrapRes.json().data;
@@ -424,6 +415,7 @@ try {
   const r1 = thematicRoles.find(r => r.id === 'role-1');
   const r2 = thematicRoles.find(r => r.id === 'role-2');
   assert(r1 && r2);
+  assert.equal(r1.name, '供应链分析角色(实时名)', 'Role name reflects live finedb.fine_custom_role.name');
   assert.deepEqual(r1.entries.map(e => e.id), ['f-root', 'rep-bi-1']);
   assert.equal(r1.entries[1].name, '库存总览(定制名)');
   assert.equal(r1.entries[1].templateId, 'tpl-bi-1');
@@ -431,10 +423,12 @@ try {
   assert.deepEqual(r2.entries.map(e => e.id), ['rep-frm-1']);
   assert.equal(r2.entries[0].type, 'frm');
   assert.equal(treeRequests, 1, 'Only /bootstrap fetched /v10/view/entry/tree once');
-  // A3: Second /bootstrap hits shared thematicCache (0 extra DB queries)
+  assert.equal(userRolesQueries, userRolesQueriesBefore + 1);
+  // A3 + FineDB hot cache: Second /bootstrap hits both userRolesCache and thematicCache (0 extra DB queries)
   const queriesAfterFirstBootstrap = thematicTreeQueries;
   const bootstrapRes2 = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: { cookie } });
   assert.equal(bootstrapRes2.statusCode, 200);
+  assert.equal(userRolesQueries, userRolesQueriesBefore + 1, 'User roles hit hot cache');
   assert.equal(thematicTreeQueries, queriesAfterFirstBootstrap, 'Thematic tree is served from shared role cache');
   // A3: Saving role-2 immediately invalidates its thematic cache entry
   const save2Updated = await app.inject({

@@ -132,9 +132,9 @@ grep '请求ID' logs/portal.log
 - `dim_bi_user`、`dim_dept_mapping`、`dim_bi_visit_log`
 - `fr_index_noticement`、`fr_quick_entry_app`
 - `portal_search_history`、`portal_role_thematic_config`、`portal_role_thematic_node`
-- 同实例 `finedb` schema（可通过 `FINEDB_SCHEMA` 调整）：`fine_user`、`fine_user_role_middle`、`fine_authority`、`fine_authority_object`（用于实时查询用户所属角色及角色可配置报表，支持上级目录递归继承与显式拒绝覆盖）
+- 同实例 `finedb` schema（可通过 `FINEDB_SCHEMA` 调整）：`fine_user`、`fine_user_role_middle`、`fine_custom_role`、`fine_authority`、`fine_authority_object`（用于实时查询用户所属角色、最新角色名及角色可配置报表；目录树在应用内存热缓存并执行 BFS，避免 PG 递归 CTE 消耗内存）
 
-`report_lifecycle` 不使用。公告部门关联为 `dim_bi_user.oa_dept_code = dim_dept_mapping.dept_job_id`，使用映射后的部门名匹配公告授权部门。专题分析关联为 `finedb.fine_user` + `finedb.fine_user_role_middle`（`roletype = 2`）→ `portal_role_thematic_config` / `portal_role_thematic_node`。
+`report_lifecycle` 不使用。公告部门关联为 `dim_bi_user.oa_dept_code = dim_dept_mapping.dept_job_id`，使用映射后的部门名匹配公告授权部门。专题分析关联为 `finedb.fine_user` + `finedb.fine_user_role_middle`（`roletype = 2`）→ `portal_role_thematic_config` / `portal_role_thematic_node`（并关联 `finedb.fine_custom_role` 同步最新角色名）。
 
 由数据库管理员按实际库名、账号执行交付包 `sql/003-search-history.sql`、`sql/004-source-indexes.sql` 和 `sql/007-role-thematic-mapping.sql`；不要执行示例库的 `001-portal.sql`。大表索引应在客户维护窗口创建。
 
@@ -146,7 +146,7 @@ GRANT USAGE ON SCHEMA public, finedb TO portal_reader;
 GRANT SELECT ON public.dim_bi_report_info_dtl, public.dim_bi_report_dictionary,
   public.dim_bi_user, public.dim_dept_mapping, public.dim_bi_visit_log,
   public.fr_index_noticement, public.fr_quick_entry_app TO portal_reader;
-GRANT SELECT ON finedb.fine_user, finedb.fine_user_role_middle,
+GRANT SELECT ON finedb.fine_user, finedb.fine_user_role_middle, finedb.fine_custom_role,
   finedb.fine_authority, finedb.fine_authority_object TO portal_reader;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.portal_search_history,
   public.portal_role_thematic_config, public.portal_role_thematic_node TO portal_reader;
