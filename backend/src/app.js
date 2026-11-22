@@ -5,7 +5,7 @@ import { logStream, logParameters } from './request-log.js';
 import staticFiles from '@fastify/static';
 import { fileURLToPath } from 'node:url';
 import portalConfig from '../../src/config/portal.json' with { type: 'json' };
-import { createPool } from './config/database.js';
+import { createFineDbPool, createPool } from './config/database.js';
 import { platformClient } from './platform.js';
 import { createTtlCache } from './ttl-cache.js';
 import { ApiError, invalid, pageQuery, requireOrigin, roleListQuery, searchQuery } from './http.js';
@@ -22,7 +22,9 @@ function cacheTtlMs(raw, fallbackSeconds, name) {
   return ms;
 }
 
-export async function buildApp({ platform, db = createPool() } = {}) {
+export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
+  const ownsFineDb = fineDb === undefined;
+  const resolvedFineDb = fineDb ?? createFineDbPool(process.env) ?? db;
   platform ||= platformClient(process.env, db);
   const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
   const rootId = process.env.FINE_ROOT_ID || '';
@@ -35,7 +37,16 @@ export async function buildApp({ platform, db = createPool() } = {}) {
   const app = Fastify({ logger: { level: 'info', stream, redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers.set-cookie'] },
     disableRequestLogging: true, genReqId: () => randomUUID(), requestIdHeader: false,
     bodyLimit: 524288, requestTimeout: 15000, ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
-  app.addHook('onClose', () => { thematicCache.clear(); catalogCache.clear(); userRolesCache.clear(); fineObjectTreeCache.clear(); return db.end(); });
+  app.addHook('onClose', async () => {
+    thematicCache.clear();
+    catalogCache.clear();
+    userRolesCache.clear();
+    fineObjectTreeCache.clear();
+    await Promise.all([
+      db.end(),
+      ...(ownsFineDb && resolvedFineDb !== db ? [resolvedFineDb.end()] : []),
+    ]);
+  });
   app.addHook('onClose', async () => { platform.close?.(); });
   if (stream) app.addHook('onClose', async () => { stream.end(); await finished(stream); });
   app.addHook('onRequest', async request => {
@@ -64,7 +75,11 @@ export async function buildApp({ platform, db = createPool() } = {}) {
     reply.code(status).send({ success: false, error: { code: error instanceof ApiError ? error.code : status === 400 ? 'INVALID_REQUEST' : status === 503 ? 'DATA_UNAVAILABLE' : 'SERVICE_ERROR', message: error instanceof ApiError ? error.message : status === 400 ? '请求参数不合法' : '服务暂时不可用，请重试' }, requestId: request.id });
   });
   app.setNotFoundHandler((request, reply) => reply.code(404).send({ success: false, error: { code: 'NOT_FOUND', message: '接口不存在' }, requestId: request.id }));
-  app.get('/health', async () => { await db.query('SELECT 1'); return { status: 'ok' }; });
+  app.get('/health', async () => {
+    await db.query('SELECT 1');
+    if (resolvedFineDb !== db) await resolvedFineDb.query('SELECT 1');
+    return { status: 'ok' };
+  });
   await app.register(async api => {
     api.decorateRequest('portal', null);
     api.addHook('preHandler', async request => {
@@ -79,7 +94,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
         platform.favorites(context),
         quickEntries(db, { cache: catalogCache, log: request.log }),
         bootstrapDate(db, request.log, { cache: catalogCache }),
-        thematicRolesFor(db, context, { cache: thematicCache, userRolesCache }),
+        thematicRolesFor(db, context, { fineDb: resolvedFineDb, cache: thematicCache, userRolesCache }),
       ]);
       const tree = rootId && context.ids.has(rootId) ? context.entries.filter(e => e.id === rootId).concat(descendants(context.entries, rootId)) : [];
       return { success: true, data: { user: { name: context.user.name }, rootId, entries: tree, thematicRoles, favoriteIds, quickEntries: links, dataAsOf: asOf, platform: platform.browser } };
@@ -168,7 +183,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       const verifiedRole = await platform.verifyRoleAccess(request.portal, request.params.roleId, roleNameHint.trim());
       return {
         success: true,
-        data: await roleThematicDetail(db, verifiedRole, { objectTreeCache: fineObjectTreeCache, forceRefresh, log: request.log }),
+        data: await roleThematicDetail(db, verifiedRole, { fineDb: resolvedFineDb, objectTreeCache: fineObjectTreeCache, forceRefresh, log: request.log }),
       };
     });
     api.post('/role-thematic/roles/:roleId/tree', {
@@ -208,6 +223,7 @@ export async function buildApp({ platform, db = createPool() } = {}) {
       return {
         success: true,
         data: await saveRoleThematicTree(db, {
+          fineDb: resolvedFineDb,
           role: verifiedRole,
           userName: request.portal.user.userName,
           nodes: request.body.nodes,
@@ -221,7 +237,10 @@ export async function buildApp({ platform, db = createPool() } = {}) {
   app.get(basePath, (request, reply) => reply.redirect(`${basePath}/${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, 308));
   app.get(`${basePath}/role-thematic-config`, (request, reply) => reply.redirect(`${basePath}/role-thematic-config/${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, 308));
   await app.register(staticFiles, { root: fileURLToPath(new URL('../../out/', import.meta.url)), prefix: `${basePath}/`, index: ['index.html'] });
-  try { await db.query('SELECT 1'); } catch (error) { await app.close(); throw error; }
+  try {
+    await db.query('SELECT 1');
+    if (resolvedFineDb !== db) await resolvedFineDb.query('SELECT 1');
+  } catch (error) { await app.close(); throw error; }
   return app;
 }
 

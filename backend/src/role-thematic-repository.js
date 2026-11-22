@@ -5,7 +5,8 @@ const VALID_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
 const VALID_TYPES = new Set(['bi', 'fvs', 'frm', 'cpt', 'url']);
 
 export function fineDbSchema(env = process.env) {
-  const name = (env.FINEDB_SCHEMA || 'finedb').trim();
+  const fallback = env.FINEDB_HOST ? 'public' : 'finedb';
+  const name = (env.FINEDB_SCHEMA || fallback).trim();
   if (!VALID_IDENTIFIER.test(name)) throw new Error('Invalid FINEDB_SCHEMA');
   return name;
 }
@@ -146,29 +147,33 @@ function compileRoleTree(config, rawNodes) {
   return { configured: true, id: config.role_id, name: config.role_name, nodes: orderedNodes };
 }
 
-async function fetchCompiledRoles(db, roleIds, log, env = process.env) {
+async function fetchFineCustomRoleNames(fineDb, roleIds, log, env = process.env) {
   const schema = fineDbSchema(env);
-  let rows;
   try {
-    ({ rows } = await db.query(
-      `/* portal: role thematic tree */
-       SELECT c.role_id,
-              coalesce(nullif(trim(fcr.name), ''), c.role_name) AS role_name,
-              n.node_id, n.parent_node_id, n.node_type, n.report_id,
-              n.node_name, n.sort_no, r.report_name AS catalog_name, r.report_type
-       FROM portal_role_thematic_config c
-       LEFT JOIN ${schema}.fine_custom_role fcr ON fcr.id = c.role_id
-       LEFT JOIN portal_role_thematic_node n
-         ON n.role_id = c.role_id AND n.is_enabled = TRUE
-       LEFT JOIN dim_bi_report_info_dtl r USING (report_id)
-       WHERE c.role_id = ANY($1::text[])
-       ORDER BY coalesce(nullif(trim(fcr.name), ''), c.role_name), c.role_id, n.parent_node_id NULLS FIRST, n.sort_no, n.node_id`,
+    const { rows } = await fineDb.query(
+      `/* portal: finedb custom role names */
+       SELECT id AS role_id, name AS role_name
+       FROM ${schema}.fine_custom_role
+       WHERE id = ANY($1::text[])`,
       [roleIds],
-    ));
+    );
+    const map = new Map();
+    for (const row of rows) {
+      if (row.role_id && typeof row.role_name === 'string' && row.role_name.trim()) {
+        map.set(row.role_id, row.role_name.trim());
+      }
+    }
+    return map;
   } catch (error) {
     if (!['42P01', '42703', '3F000', '42501'].includes(error.code)) throw error;
     log?.warn({ stage: 'thematic-cache', code: error.code, reason: error.message }, 'finedb.fine_custom_role unavailable, falling back to stored role_name');
-    ({ rows } = await db.query(
+    return new Map();
+  }
+}
+
+async function fetchCompiledRoles(db, fineDb, roleIds, log, env = process.env) {
+  const [{ rows }, liveRoleNames] = await Promise.all([
+    db.query(
       `/* portal: role thematic tree */
        SELECT c.role_id, c.role_name,
               n.node_id, n.parent_node_id, n.node_type, n.report_id,
@@ -180,13 +185,17 @@ async function fetchCompiledRoles(db, roleIds, log, env = process.env) {
        WHERE c.role_id = ANY($1::text[])
        ORDER BY c.role_name, c.role_id, n.parent_node_id NULLS FIRST, n.sort_no, n.node_id`,
       [roleIds],
-    ));
-  }
+    ),
+    fetchFineCustomRoleNames(fineDb, roleIds, log, env),
+  ]);
   const grouped = new Map();
   for (const row of rows) {
     let entry = grouped.get(row.role_id);
     if (!entry) {
-      entry = { config: { role_id: row.role_id, role_name: row.role_name }, rows: [] };
+      entry = {
+        config: { role_id: row.role_id, role_name: liveRoleNames.get(row.role_id) || row.role_name },
+        rows: [],
+      };
       grouped.set(row.role_id, entry);
     }
     if (row.node_id) entry.rows.push(row);
@@ -200,13 +209,13 @@ async function fetchCompiledRoles(db, roleIds, log, env = process.env) {
   return compiled;
 }
 
-export async function thematicRolesFor(db, context, { cache, userRolesCache, env = process.env } = {}) {
+export async function thematicRolesFor(db, context, { fineDb = db, cache, userRolesCache, env = process.env } = {}) {
   let roleIds;
   if (Array.isArray(context.user?.roleIds)) {
     roleIds = context.user.roleIds;
   } else {
     try {
-      roleIds = await userRoleIds(db, context.user.userName, { cache: userRolesCache, log: context.log, env });
+      roleIds = await userRoleIds(fineDb, context.user.userName, { cache: userRolesCache, log: context.log, env });
     } catch (error) {
       if (error.code === '42P01' || error.code === '42703' || error.code === '3F000') {
         context.log?.warn({ stage: 'role-thematic', code: error.code, reason: error.message }, 'role thematic finedb user roles unavailable');
@@ -226,7 +235,7 @@ export async function thematicRolesFor(db, context, { cache, userRolesCache, env
   }
   if (missing.length) {
     try {
-      const loaded = await fetchCompiledRoles(db, missing, context.log, env);
+      const loaded = await fetchCompiledRoles(db, fineDb, missing, context.log, env);
       for (const [id, value] of loaded) {
         cache?.set(id, value);
         resolved.push(value);
@@ -296,7 +305,12 @@ export async function roleSummaryCounts(db, roleIds) {
   }]));
 }
 
-export function buildAuthorityObjectIndex(rows) {
+export function buildAuthorityObjectIndex(rows, catalogRows = []) {
+  const catalogById = new Map();
+  for (const item of catalogRows) {
+    const id = typeof item.report_id === 'string' ? item.report_id.trim() : '';
+    if (id && !catalogById.has(id)) catalogById.set(id, item);
+  }
   const byId = new Map();
   const childrenByParent = new Map();
   for (const row of rows) {
@@ -306,14 +320,16 @@ export function buildAuthorityObjectIndex(rows) {
     if (expandType === 1 || expandType === 2) continue;
     const parentId = typeof row.parent_id === 'string' && row.parent_id.trim() ? row.parent_id.trim() : null;
     const displayName = typeof row.display_name === 'string' ? row.display_name.trim() : '';
-    const catalogName = typeof row.catalog_name === 'string' ? row.catalog_name.trim() : '';
+    const catalog = catalogById.get(id);
+    const catalogName = typeof (catalog?.report_name ?? row.catalog_name) === 'string' ? (catalog?.report_name ?? row.catalog_name).trim() : '';
+    const fallbackType = catalog?.report_type ?? row.report_type ?? null;
     const node = {
       id,
       parentId,
       expandType,
       reportName: displayName || catalogName || id,
       catalogName: catalogName || displayName || id,
-      reportType: inferReportTypeFromAuthorityObject(expandType, row.object_path, row.report_type),
+      reportType: inferReportTypeFromAuthorityObject(expandType, row.object_path, fallbackType),
     };
     byId.set(id, node);
     if (parentId) {
@@ -368,27 +384,43 @@ export function resolveAllowedReportsFromTree(tree, directAuthRows) {
   return reports.sort((a, b) => a.reportName.localeCompare(b.reportName, 'zh-CN') || a.reportId.localeCompare(b.reportId));
 }
 
-async function loadFineAuthorityObjectTree(db, { cache, forceRefresh = false, log, env = process.env } = {}) {
+async function loadCatalogMetadataForTree(db, log) {
+  try {
+    const { rows } = await db.query(
+      `/* portal: catalog metadata for authority tree */
+       SELECT report_id, report_name, report_type
+       FROM dim_bi_report_info_dtl
+       WHERE report_id IS NOT NULL`,
+    );
+    return rows;
+  } catch (error) {
+    if (!['42P01', '42703'].includes(error.code)) throw error;
+    log?.warn({ stage: 'finedb-object-tree-cache', code: error.code, reason: error.message }, 'dim_bi_report_info_dtl unavailable for authority tree');
+    return [];
+  }
+}
+
+async function loadFineAuthorityObjectTree(db, { fineDb = db, cache, forceRefresh = false, log, env = process.env } = {}) {
   const schema = fineDbSchema(env);
   const key = `${schema}:authority-object-tree`;
   if (forceRefresh) cache?.delete(key);
   const loader = async () => {
-    const { rows } = await db.query(
-      `/* portal: finedb authority object tree */
-       SELECT fao.id,
-              fao.parentid AS parent_id,
-              fao.displayname AS display_name,
-              fao.expandtype AS expand_type,
-              fao.path AS object_path,
-              r.report_name AS catalog_name,
-              r.report_type
-       FROM ${schema}.fine_authority_object fao
-       LEFT JOIN dim_bi_report_info_dtl r ON r.report_id = fao.id
-       WHERE fao.id IS NOT NULL
-         AND trim(fao.id) <> ''
-         AND coalesce(fao.expandtype, 0) NOT IN (1, 2)`,
-    );
-    return buildAuthorityObjectIndex(rows);
+    const [faoResult, catalogRows] = await Promise.all([
+      fineDb.query(
+        `/* portal: finedb authority object tree */
+         SELECT fao.id,
+                fao.parentid AS parent_id,
+                fao.displayname AS display_name,
+                fao.expandtype AS expand_type,
+                fao.path AS object_path
+         FROM ${schema}.fine_authority_object fao
+         WHERE fao.id IS NOT NULL
+           AND trim(fao.id) <> ''
+           AND coalesce(fao.expandtype, 0) NOT IN (1, 2)`,
+      ),
+      loadCatalogMetadataForTree(db, log),
+    ]);
+    return buildAuthorityObjectIndex(faoResult.rows, catalogRows);
   };
   if (!cache) return loader();
   return cache.getOrLoad(key, loader, {
@@ -396,11 +428,11 @@ async function loadFineAuthorityObjectTree(db, { cache, forceRefresh = false, lo
   });
 }
 
-export async function availableReportsForRole(db, roleId, { objectTreeCache, forceRefresh = false, log, env = process.env } = {}) {
+export async function availableReportsForRole(db, roleId, { fineDb = db, objectTreeCache, forceRefresh = false, log, env = process.env } = {}) {
   const schema = fineDbSchema(env);
   const [tree, authResult] = await Promise.all([
-    loadFineAuthorityObjectTree(db, { cache: objectTreeCache, forceRefresh, log, env }),
-    db.query(
+    loadFineAuthorityObjectTree(db, { fineDb, cache: objectTreeCache, forceRefresh, log, env }),
+    fineDb.query(
       `/* portal: finedb role direct authority */
        SELECT fa.authorityentityid AS object_id,
               min(fa.authority)::int AS direct_auth
@@ -417,7 +449,7 @@ export async function availableReportsForRole(db, roleId, { objectTreeCache, for
   return resolveAllowedReportsFromTree(tree, authResult.rows);
 }
 
-export async function roleThematicDetail(db, role, { objectTreeCache, forceRefresh = false, log, env = process.env } = {}) {
+export async function roleThematicDetail(db, role, { fineDb = db, objectTreeCache, forceRefresh = false, log, env = process.env } = {}) {
   const [configResult, nodesResult, availableReports] = await Promise.all([
     db.query(
       `SELECT role_id, role_name, updated_by, updated_at
@@ -434,7 +466,7 @@ export async function roleThematicDetail(db, role, { objectTreeCache, forceRefre
        ORDER BY n.parent_node_id NULLS FIRST, n.sort_no, n.node_id`,
       [role.id],
     ),
-    availableReportsForRole(db, role.id, { objectTreeCache, forceRefresh, log, env }),
+    availableReportsForRole(db, role.id, { fineDb, objectTreeCache, forceRefresh, log, env }),
   ]);
 
   const config = configResult.rows[0] || null;
@@ -467,11 +499,11 @@ export async function roleThematicDetail(db, role, { objectTreeCache, forceRefre
   };
 }
 
-export async function saveRoleThematicTree(db, { role, userName, nodes, cache, objectTreeCache, log, env = process.env }) {
+export async function saveRoleThematicTree(db, { fineDb = db, role, userName, nodes, cache, objectTreeCache, log, env = process.env }) {
   const checked = validateRoleThematicNodes(nodes);
   if (!checked.ok) throw new ApiError(400, 'INVALID_REQUEST', checked.message);
 
-  const available = await availableReportsForRole(db, role.id, { objectTreeCache, log, env });
+  const available = await availableReportsForRole(db, role.id, { fineDb, objectTreeCache, log, env });
   const availableIds = new Set(available.map(item => item.reportId));
   for (const node of checked.nodes) {
     if (node.nodeType === 'report' && !availableIds.has(node.reportId)) {
@@ -499,5 +531,5 @@ export async function saveRoleThematicTree(db, { role, userName, nodes, cache, o
   });
 
   cache?.delete(role.id);
-  return roleThematicDetail(db, role, { objectTreeCache, log, env });
+  return roleThematicDetail(db, role, { fineDb, objectTreeCache, log, env });
 }

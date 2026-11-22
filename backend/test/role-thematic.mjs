@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createFineDbPool } from '../src/config/database.js';
 import { platformClient } from '../src/platform.js';
 import { buildApp } from '../src/app.js';
 import {
@@ -12,9 +13,12 @@ import {
   userRoleIds,
 } from '../src/role-thematic-repository.js';
 
-// Unit checks for FineDB schema validation & report type inference
+// Unit checks for FineDB pool & schema validation & report type inference
+assert.equal(createFineDbPool({}), null);
+assert.throws(() => createFineDbPool({ FINEDB_HOST: '10.11.8.172' }), /Missing FINEDB_USER/);
 assert.equal(fineDbSchema({}), 'finedb');
-assert.equal(fineDbSchema({ FINEDB_SCHEMA: 'custom_finedb' }), 'custom_finedb');
+assert.equal(fineDbSchema({ FINEDB_HOST: '10.11.8.172' }), 'public');
+assert.equal(fineDbSchema({ FINEDB_HOST: '10.11.8.172', FINEDB_SCHEMA: 'custom_finedb' }), 'custom_finedb');
 assert.throws(() => fineDbSchema({ FINEDB_SCHEMA: 'finedb; DROP TABLE x' }), /Invalid FINEDB_SCHEMA/);
 
 assert.equal(inferReportTypeFromAuthorityObject(201, 'any/path'), 'bi');
@@ -145,17 +149,25 @@ function directAuthRowsForRole(roleId) {
   return [...byObj.entries()].map(([object_id, direct_auth]) => ({ object_id, direct_auth }));
 }
 
+const portalCatalogRows = [
+  { report_id: 'rep-bi-1', report_name: '库存总览', report_type: 'bi' },
+  { report_id: 'rep-cpt-1', report_name: '仓储成本明细', report_type: 'cpt' },
+  { report_id: 'rep-unauth', report_name: '未授权报表', report_type: 'cpt' },
+  { report_id: 'rep-frm-1', report_name: '经营填报', report_type: 'frm' },
+];
+
 let lastObjectTreeSql = '';
 let lastDirectAuthSql = '';
 let lastUserRolesSql = '';
+let lastCustomRoleNamesSql = '';
 let objectTreeQueries = 0;
 let directAuthQueries = 0;
 let userRolesQueries = 0;
-const db = {
+
+// Strictly isolated FineDB PG stub: rejects any portal/dim_bi query!
+const fineDb = {
   async query(sql, params = []) {
     if (sql.includes('SELECT 1')) return { rows: [{ '?column?': 1 }] };
-    if (sql.includes('max(day_id)')) return { rows: [{ day: '2026-11-19' }] };
-    if (sql.includes('FROM fr_quick_entry_app')) return { rows: [] };
     if (sql.includes('/* portal: finedb user roles */')) {
       lastUserRolesSql = sql;
       userRolesQueries++;
@@ -166,15 +178,42 @@ const db = {
         .map(m => m.roleid))].sort();
       return { rows: roleIds.map(role_id => ({ role_id })) };
     }
+    if (sql.includes('/* portal: finedb custom role names */')) {
+      lastCustomRoleNamesSql = sql;
+      const ids = params[0] || [];
+      return {
+        rows: ids
+          .filter(id => fineCustomRoles.has(id))
+          .map(id => ({ role_id: id, role_name: fineCustomRoles.get(id) })),
+      };
+    }
     if (sql.includes('/* portal: finedb authority object tree */')) {
       lastObjectTreeSql = sql;
       objectTreeQueries++;
-      return { rows: fineAuthorityObjects.filter(o => ![1, 2].includes(o.expand_type ?? 0)) };
+      return {
+        rows: fineAuthorityObjects
+          .filter(o => ![1, 2].includes(o.expand_type ?? 0))
+          .map(({ id, parent_id, display_name, expand_type, object_path }) => ({ id, parent_id, display_name, expand_type, object_path })),
+      };
     }
     if (sql.includes('/* portal: finedb role direct authority */')) {
       lastDirectAuthSql = sql;
       directAuthQueries++;
       return { rows: directAuthRowsForRole(params[0]) };
+    }
+    throw new Error(`Unexpected SQL sent to fineDb in test: ${sql}`);
+  },
+  async end() {},
+};
+
+// Strictly isolated Portal PG stub: rejects any finedb query!
+const db = {
+  async query(sql, params = []) {
+    if (sql.includes('SELECT 1')) return { rows: [{ '?column?': 1 }] };
+    if (sql.includes('max(day_id)')) return { rows: [{ day: '2026-11-19' }] };
+    if (sql.includes('FROM fr_quick_entry_app')) return { rows: [] };
+    if (sql.includes('/* portal: catalog metadata for authority tree */')) {
+      return { rows: portalCatalogRows };
     }
     if (sql.includes('FROM portal_role_thematic_config c') && sql.includes('GROUP BY c.role_id')) {
       const ids = params[0] || [];
@@ -193,24 +232,22 @@ const db = {
     if (sql.includes('/* portal: role thematic tree */')) {
       thematicTreeQueries++;
       const ids = new Set(params[0] || []);
-      const tree = buildAuthorityObjectIndex(fineAuthorityObjects);
+      const catalogMap = new Map(portalCatalogRows.map(r => [r.report_id, r]));
       const rows = [];
       for (const cfg of [...configs.values()].filter(c => ids.has(c.role_id)).sort((a, b) => a.role_name.localeCompare(b.role_name))) {
-        const liveRoleName = fineCustomRoles.get(cfg.role_id) || cfg.role_name;
-        const avail = new Map(resolveAllowedReportsFromTree(tree, directAuthRowsForRole(cfg.role_id)).map(r => [r.reportId, r]));
         const enabledNodes = (nodesByRole.get(cfg.role_id) || []).filter(n => n.is_enabled);
         if (!enabledNodes.length) {
           rows.push({
-            role_id: cfg.role_id, role_name: liveRoleName,
+            role_id: cfg.role_id, role_name: cfg.role_name,
             node_id: null, parent_node_id: null, node_type: null, report_id: null,
             node_name: null, sort_no: null, catalog_name: null, report_type: null,
           });
         } else {
           for (const n of enabledNodes) {
-            const r = n.report_id ? avail.get(n.report_id) : null;
+            const r = n.report_id ? catalogMap.get(n.report_id) : null;
             rows.push({
-              role_id: cfg.role_id, role_name: liveRoleName,
-              ...n, catalog_name: r?.catalogName || null, report_type: r?.reportType || null,
+              role_id: cfg.role_id, role_name: cfg.role_name,
+              ...n, catalog_name: r?.report_name || null, report_type: r?.report_type || null,
             });
           }
         }
@@ -223,12 +260,11 @@ const db = {
     }
     if (sql.includes('FROM portal_role_thematic_node n') && sql.includes('WHERE n.role_id = $1')) {
       const id = params[0];
-      const tree = buildAuthorityObjectIndex(fineAuthorityObjects);
-      const avail = new Map(resolveAllowedReportsFromTree(tree, directAuthRowsForRole(id)).map(r => [r.reportId, r]));
+      const catalogMap = new Map(portalCatalogRows.map(r => [r.report_id, r]));
       return {
         rows: (nodesByRole.get(id) || []).map(n => {
-          const r = n.report_id ? avail.get(n.report_id) : null;
-          return { ...n, catalog_name: r?.catalogName || null, report_type: r?.reportType || null };
+          const r = n.report_id ? catalogMap.get(n.report_id) : null;
+          return { ...n, catalog_name: r?.report_name || null, report_type: r?.report_type || null };
         }),
       };
     }
@@ -260,24 +296,25 @@ const db = {
       nodesByRole.set(params[1], list);
       return { rows: [] };
     }
-    throw new Error(`Unexpected SQL in test: ${sql}`);
+    throw new Error(`Unexpected SQL sent to portal db in test: ${sql}`);
   },
   async end() {},
 };
 
-// Direct unit checks for FineDB SQL generation and in-memory BFS inheritance / deny filtering (zero PG WITH RECURSIVE!)
-const directUserRoles = await userRoleIds(db, 'alice');
+// Direct unit checks for isolated dual-DB FineDB SQL generation and in-memory BFS inheritance / deny filtering
+const directUserRoles = await userRoleIds(fineDb, 'alice');
 assert.deepEqual(directUserRoles, ['role-1', 'role-2']);
 assert(lastUserRolesSql.includes('finedb.fine_user_role_middle'));
 assert(lastUserRolesSql.includes('finedb.fine_user'));
 assert(lastUserRolesSql.includes('urm.roletype = 2'));
 
-const role1Reports = await availableReportsForRole(db, 'role-1');
+const role1Reports = await availableReportsForRole(db, 'role-1', { fineDb });
 assert.deepEqual(
   role1Reports.map(r => [r.reportId, r.reportType]).sort(),
   [['rep-bi-1', 'bi'], ['rep-cpt-1', 'cpt'], ['rep-unauth', 'cpt']],
 );
 assert(!lastObjectTreeSql.includes('WITH RECURSIVE'), 'Object tree load must not run recursive CTE in PG');
+assert(!lastObjectTreeSql.includes('dim_bi_report_info_dtl'), 'FineDB query must not cross-join portal tables');
 assert(lastObjectTreeSql.includes('finedb.fine_authority_object'));
 assert(lastDirectAuthSql.includes('finedb.fine_authority'));
 assert(!lastDirectAuthSql.includes('WITH RECURSIVE'), 'Direct authority query must be a flat single-table lookup');
@@ -293,7 +330,7 @@ try {
     FINE_ROLES_PATH: '/v10/roles',
     FINE_ROLES_PRIVILEGE_TYPE: '2',
   }, db);
-  app = await buildApp({ platform, db });
+  app = await buildApp({ platform, db, fineDb });
   const cookie = 'fine_auth_token=admin-token';
 
   // 1. Standalone route served under /portal/role-thematic-config/ (and redirects without trailing slash)
