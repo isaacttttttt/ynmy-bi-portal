@@ -547,6 +547,7 @@ legend { margin-bottom:12px; font-size:15px; font-weight:600; color:#617fa6; }
 .attachment-kind-badge.kind-pdf { background:#fee2e2; color:#b91c1c; }
 .attachment-preview-title { margin:0; font-size:16px; font-weight:600; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .attachment-preview-actions { flex:none; display:flex; align-items:center; gap:12px; }
+.attachment-page-count { font-size:12px; font-weight:500; color:#475569; padding:4px 10px; border-radius:8px; background:#f1f5f9; }
 .attachment-zoom-controls { display:inline-flex; align-items:center; gap:6px; padding:3px 6px; border:1px solid #dbe4f0; border-radius:8px; background:#f8fafc; }
 .attachment-tool-btn { width:26px; height:26px; border:0; border-radius:6px; background:transparent; color:#334155; display:grid; place-items:center; cursor:pointer; }
 .attachment-tool-btn:hover { background:#e2e8f0; }
@@ -572,4 +573,5 @@ legend { margin-bottom:12px; font-size:15px; font-weight:600; color:#617fa6; }
 .attachment-office-stage.is-hidden { display:none; }
 .attachment-office-host { width:100%; display:flex; flex-direction:column; align-items:center; }
 .attachment-office-host.kind-docx .docx-wrapper { background:transparent; padding:0; }
-.attachment-office-host.kind-docx .docx-wrapper > section.docx { box-shadow:0 6px 20px rgba(15, 23, 42, .08); margin-bottom:20px; }
+.attachment-office-host.kind-docx .docx-wrapper > section.docx { position:relative; box-shadow:0 6px 20px rgba(15, 23, 42, .08); margin-bottom:20px; }
+.attachment-office-host.kind-docx .docx-page-number { position:absolute; left:0; right:0; bottom:18px; text-align:center; font-size:12px; color:#64748b; pointer-events:none; user-select:none; }

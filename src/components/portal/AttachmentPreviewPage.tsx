@@ -51,6 +51,72 @@ function KindIcon({ kind }: { kind: AttachmentPreviewKind }) {
   return <FileText size={18} />;
 }
 
+function paginateAndNumberDocx(host: HTMLElement): number {
+  const wrapper = host.querySelector<HTMLElement>('.docx-wrapper') ?? host;
+  const initialSections = Array.from(wrapper.querySelectorAll<HTMLElement>(':scope > section.docx'));
+  if (!initialSections.length) return 0;
+
+  for (const section of initialSections) {
+    const style = window.getComputedStyle(section);
+    const minHeight = parseFloat(style.minHeight) || 1122;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const paddingBottom = parseFloat(style.paddingBottom) || 0;
+    const headerHeight = section.querySelector<HTMLElement>(':scope > header')?.offsetHeight || 0;
+    const footerHeight = section.querySelector<HTMLElement>(':scope > footer')?.offsetHeight || 0;
+    const maxContentHeight = Math.max(320, minHeight - paddingTop - paddingBottom - headerHeight - footerHeight - 16);
+
+    // Only auto-split when a section has no soft page breaks and overflows a single page significantly.
+    if (section.scrollHeight <= minHeight * 1.15) continue;
+
+    const article = section.querySelector<HTMLElement>(':scope > article');
+    if (!article) continue;
+    const blocks = Array.from(article.children) as HTMLElement[];
+    if (blocks.length <= 1) continue;
+
+    // Measure each block's height including vertical margins before moving nodes.
+    const measured = blocks.map(el => {
+      const cs = window.getComputedStyle(el);
+      const h = el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+      return { el, h };
+    });
+
+    const pages: HTMLElement[][] = [[]];
+    let currentHeight = 0;
+    for (const { el, h } of measured) {
+      if (pages[pages.length - 1].length > 0 && currentHeight + h > maxContentHeight) {
+        pages.push([el]);
+        currentHeight = h;
+      } else {
+        pages[pages.length - 1].push(el);
+        currentHeight += h;
+      }
+    }
+    if (pages.length <= 1) continue;
+
+    // Keep the first page's blocks in the original section, and clone the section shell for subsequent pages.
+    article.replaceChildren(...pages[0]);
+    let insertAfter: HTMLElement = section;
+    for (let i = 1; i < pages.length; i++) {
+      const nextSection = section.cloneNode(true) as HTMLElement;
+      const nextArticle = nextSection.querySelector<HTMLElement>(':scope > article');
+      if (nextArticle) nextArticle.replaceChildren(...pages[i]);
+      insertAfter.insertAdjacentElement('afterend', nextSection);
+      insertAfter = nextSection;
+    }
+  }
+
+  const finalSections = Array.from(wrapper.querySelectorAll<HTMLElement>(':scope > section.docx'));
+  const total = finalSections.length;
+  finalSections.forEach((section, index) => {
+    section.querySelectorAll(':scope > .docx-page-number').forEach(el => el.remove());
+    const badge = document.createElement('div');
+    badge.className = 'docx-page-number';
+    badge.textContent = `第 ${index + 1} / ${total} 页`;
+    section.appendChild(badge);
+  });
+  return total;
+}
+
 export default function AttachmentPreviewPage() {
   const [params, setParams] = useState<PreviewParams>(() => ({ url: '', name: '附件预览', ext: '', kind: 'unsupported' }));
   const [ready, setReady] = useState(false);
@@ -59,6 +125,7 @@ export default function AttachmentPreviewPage() {
   const [sheets, setSheets] = useState<SheetData[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   const [zoom, setZoom] = useState(100);
+  const [docxPages, setDocxPages] = useState(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -81,6 +148,7 @@ export default function AttachmentPreviewPage() {
       setLoadError(null);
       setSheets([]);
       setActiveSheet(0);
+      setDocxPages(0);
       if (hostRef.current) hostRef.current.innerHTML = '';
 
       try {
@@ -99,8 +167,14 @@ export default function AttachmentPreviewPage() {
             ignoreWidth: false,
             ignoreHeight: false,
             breakPages: true,
+            ignoreLastRenderedPageBreak: false,
+            renderHeaders: true,
+            renderFooters: true,
             experimental: false,
           });
+          if (!disposed && hostRef.current) {
+            setDocxPages(paginateAndNumberDocx(hostRef.current));
+          }
         } else if (params.kind === 'xlsx') {
           const XLSX = await import('xlsx');
           if (disposed) return;
@@ -168,6 +242,9 @@ export default function AttachmentPreviewPage() {
           <h1 className="attachment-preview-title" title={params.name}>{params.name}</h1>
         </div>
         <div className="attachment-preview-actions">
+          {params.kind === 'docx' && docxPages > 0 && !effectiveError && (
+            <span className="attachment-page-count">共 {docxPages} 页</span>
+          )}
           {showZoom && !effectiveError && (
             <div className="attachment-zoom-controls" aria-label="缩放控制">
               <button
