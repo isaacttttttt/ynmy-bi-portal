@@ -36,13 +36,10 @@ export default function ThematicAnalysisModule() {
         <button className="group-select" aria-label="选择角色" aria-haspopup="menu">{activeRole.name}<ChevronDown size={14} /></button>
       </Dropdown>}
     </div>
-    {activeRole && (roles.length > 1 || path.length > 0) && <Breadcrumb className="breadcrumbs" aria-label="专题角色与目录路径"><BreadcrumbList>
+    {activeRole && path.length > 0 && <Breadcrumb className="breadcrumbs" aria-label="专题目录路径"><BreadcrumbList>
       <BreadcrumbItem>
         <FolderOpen size={14} />
-        <button aria-current={path.length === 0 ? 'page' : undefined} onClick={() => setFolderId(null)}>{activeRole.name}</button>
-        {roles.length > 1 && <Dropdown trigger={['click']} overlayClassName="topic-dropdown" getPopupContainer={() => document.body} menu={roleMenu}>
-          <button aria-label="切换角色" aria-haspopup="menu"><ChevronDown size={12} /></button>
-        </Dropdown>}
+        <button onClick={() => setFolderId(null)}>{activeRole.name}</button>
       </BreadcrumbItem>
       {path.map((entry, index) => <Fragment key={entry.id}><BreadcrumbSeparator /><BreadcrumbItem>
         <button aria-current={index === path.length - 1 ? 'page' : undefined} onClick={() => setFolderId(entry.id)}>{entry.name}</button>
