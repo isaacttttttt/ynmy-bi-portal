@@ -7,8 +7,8 @@ const designWidth = 1920;
 
 export default function PortalViewport({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  if (pathname?.startsWith('/role-thematic-config')) {
-    return <div className="portal-viewport role-config-viewport">{children}</div>;
+  if (pathname?.startsWith('/attachment-preview')) {
+    return <>{children}</>;
   }
   return <FitPortalViewport>{children}</FitPortalViewport>;
 }
