@@ -236,6 +236,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
   }, { prefix: `${basePath}/api/portal/v1` });
   app.get(basePath, (request, reply) => reply.redirect(`${basePath}/${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, 308));
   app.get(`${basePath}/role-thematic-config`, (request, reply) => reply.redirect(`${basePath}/role-thematic-config/${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, 308));
+  app.get(`${basePath}/attachment-preview`, (request, reply) => reply.redirect(`${basePath}/attachment-preview/${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, 308));
   await app.register(staticFiles, { root: fileURLToPath(new URL('../../out/', import.meta.url)), prefix: `${basePath}/`, index: ['index.html'] });
   try {
     await db.query('SELECT 1');

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const ts = require('typescript');
 require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText, filename);
-const { emptyFilters, queryReports, volume, descendants, breadcrumb, safeUrl, searchCatalog, validateRoleThematicNodes, folderAccessState, moveRoleThematicNode, isDescendantNode, roleThematicBreadcrumb } = require('../src/lib/portal-model.ts');
+const { emptyFilters, queryReports, volume, descendants, breadcrumb, safeUrl, searchCatalog, validateRoleThematicNodes, folderAccessState, moveRoleThematicNode, isDescendantNode, roleThematicBreadcrumb, attachmentExtension, attachmentPreviewKind, buildAttachmentPreviewUrl } = require('../src/lib/portal-model.ts');
 const { reports, bootstrap } = require('./fixtures/portal-fixtures.ts');
 const query = (q = '', filters = emptyFilters(), page = 1) => queryReports(reports, { q, filters, page, pageSize: 6 });
 assert.equal(query(' ROI ').items[0].module, '电商');
@@ -70,6 +70,17 @@ assert.deepEqual(roleThematicBreadcrumb([
 ], 'f2').map(e => e.id), ['f1', 'f2']);
 assert.throws(() => safeUrl('javascript:alert(1)'));
 assert.throws(() => safeUrl('data:text/html,unsafe'));
+// Attachment preview classification checks
+assert.equal(attachmentExtension('月度汇报.DOCX', '/files/1'), 'docx');
+assert.equal(attachmentExtension('附件', '/files/guide.pptx?t=123'), 'pptx');
+assert.equal(attachmentPreviewKind('架构图.png', '/files/1'), 'image');
+assert.equal(attachmentPreviewKind('制度.pdf', '/files/1'), 'pdf');
+assert.equal(attachmentPreviewKind('制度.docx', '/files/1'), 'docx');
+assert.equal(attachmentPreviewKind('台账.xlsx', '/files/1'), 'xlsx');
+assert.equal(attachmentPreviewKind('旧表.xls', '/files/1'), 'xlsx');
+assert.equal(attachmentPreviewKind('汇报.pptx', '/files/1'), 'pptx');
+assert.equal(attachmentPreviewKind('旧版.ppt', '/files/1'), 'unsupported');
+assert.equal(buildAttachmentPreviewUrl('/files/a.docx', '制度.docx'), '/portal/attachment-preview/?url=%2Ffiles%2Fa.docx&name=%E5%88%B6%E5%BA%A6.docx');
 assert(searchCatalog(reports, 'report', '').items.every(item => item.report.status === 'active'));
 assert.equal(searchCatalog(reports, 'metric', 'roi').items[0].value, 'ROI');
 const combined = searchCatalog(reports, 'all', '');

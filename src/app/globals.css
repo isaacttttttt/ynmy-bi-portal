@@ -525,3 +525,51 @@ legend { margin-bottom:12px; font-size:15px; font-weight:600; color:#617fa6; }
 .role-picker-empty { padding:48px 24px; text-align:center; color:var(--muted); font-size:13px; }
 .role-picker-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .role-picker-actions { display:flex; align-items:center; gap:10px; }
+
+/* Notice attachment preview & download bar */
+.notice-link-row { margin:12px 0 0; }
+.notice-attachment-bar { margin-top:14px; padding:10px 14px; border-radius:10px; border:1px solid #d9e6fa; background:#f5f9ff; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.notice-attachment-preview { flex:1; min-width:0; border:0; background:transparent; padding:0; display:inline-flex; align-items:center; gap:8px; color:#1d4ed8; font-size:14px; font-weight:500; text-align:left; cursor:pointer; }
+.notice-attachment-preview:hover .notice-attachment-name { text-decoration:underline; }
+.notice-attachment-icon { flex:none; color:#3b82f6; }
+.notice-attachment-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.notice-attachment-tag { flex:none; display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; background:#e0ecff; color:#1d4ed8; font-size:12px; font-weight:500; }
+.notice-attachment-download { flex:none; display:inline-flex; align-items:center; gap:5px; padding:5px 12px; border-radius:8px; border:1px solid #bfd4f8; background:#fff; color:#1d4ed8; font-size:13px; font-weight:500; text-decoration:none; transition:background .15s ease, border-color .15s ease; }
+.notice-attachment-download:hover { background:#e8f1ff; border-color:#93b8f6; color:#1e40af; }
+
+/* Standalone attachment preview page (/portal/attachment-preview/) */
+.attachment-preview-shell { min-height:100vh; display:flex; flex-direction:column; background:#f3f6fb; color:#0f172a; }
+.attachment-preview-header { position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 24px; background:#fff; border-bottom:1px solid #e2e8f0; box-shadow:0 1px 4px rgba(15, 23, 42, .05); }
+.attachment-preview-title-group { min-width:0; display:flex; align-items:center; gap:12px; }
+.attachment-kind-badge { flex:none; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:8px; font-size:12px; font-weight:600; background:#e0ecff; color:#1d4ed8; }
+.attachment-kind-badge.kind-xlsx { background:#dcfce7; color:#15803d; }
+.attachment-kind-badge.kind-pptx { background:#ffedd5; color:#c2410c; }
+.attachment-kind-badge.kind-pdf { background:#fee2e2; color:#b91c1c; }
+.attachment-preview-title { margin:0; font-size:16px; font-weight:600; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.attachment-preview-actions { flex:none; display:flex; align-items:center; gap:12px; }
+.attachment-zoom-controls { display:inline-flex; align-items:center; gap:6px; padding:3px 6px; border:1px solid #dbe4f0; border-radius:8px; background:#f8fafc; }
+.attachment-tool-btn { width:26px; height:26px; border:0; border-radius:6px; background:transparent; color:#334155; display:grid; place-items:center; cursor:pointer; }
+.attachment-tool-btn:hover { background:#e2e8f0; }
+.attachment-zoom-value { min-width:44px; text-align:center; font-size:12px; font-weight:600; color:#334155; }
+.attachment-download-btn { display:inline-flex; align-items:center; gap:6px; text-decoration:none; }
+.attachment-sheet-tabs { display:flex; align-items:center; gap:6px; padding:8px 24px; background:#fff; border-bottom:1px solid #e2e8f0; overflow-x:auto; }
+.attachment-sheet-tab { flex:none; border:1px solid #dbe4f0; background:#f8fafc; color:#475569; border-radius:7px; padding:5px 14px; font-size:13px; cursor:pointer; }
+.attachment-sheet-tab.active { background:#2563eb; border-color:#2563eb; color:#fff; font-weight:600; }
+.attachment-preview-body { flex:1; padding:24px; overflow:auto; }
+.attachment-preview-state { max-width:520px; margin:72px auto; padding:32px 24px; border-radius:14px; background:#fff; border:1px solid #e2e8f0; display:flex; flex-direction:column; align-items:center; gap:14px; text-align:center; color:#475569; }
+.attachment-preview-state.is-error { color:#b91c1c; border-color:#fecaca; }
+.attachment-spin { animation:attachment-spin 1s linear infinite; color:#2563eb; }
+@keyframes attachment-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+.attachment-image-stage { display:flex; justify-content:center; align-items:flex-start; }
+.attachment-image-item { max-width:100%; height:auto; border-radius:10px; box-shadow:0 8px 24px rgba(15, 23, 42, .12); background:#fff; }
+.attachment-pdf-frame { width:100%; height:calc(100vh - 110px); border:1px solid #dbe4f0; border-radius:10px; background:#fff; }
+.attachment-xlsx-stage { background:#fff; border:1px solid #dbe4f0; border-radius:10px; overflow:auto; max-height:calc(100vh - 140px); }
+.attachment-xlsx-table { border-collapse:collapse; width:max-content; min-width:100%; font-size:13px; }
+.attachment-xlsx-table th, .attachment-xlsx-table td { border:1px solid #e2e8f0; padding:6px 10px; text-align:left; white-space:nowrap; max-width:420px; overflow:hidden; text-overflow:ellipsis; }
+.attachment-xlsx-table tr.is-header td { background:#f1f5f9; font-weight:600; color:#0f172a; }
+.attachment-xlsx-rownum { background:#f8fafc; color:#94a3b8; font-weight:500; text-align:right; width:44px; user-select:none; }
+.attachment-office-stage { display:flex; justify-content:center; }
+.attachment-office-stage.is-hidden { display:none; }
+.attachment-office-host { width:100%; display:flex; flex-direction:column; align-items:center; }
+.attachment-office-host.kind-docx .docx-wrapper { background:transparent; padding:0; }
+.attachment-office-host.kind-docx .docx-wrapper > section.docx { box-shadow:0 6px 20px rgba(15, 23, 42, .08); margin-bottom:20px; }

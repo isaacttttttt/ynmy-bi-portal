@@ -376,3 +376,33 @@ export function roleThematicBreadcrumb(entries: Entry[], folderId: string | null
   }
   return path;
 }
+
+export type AttachmentPreviewKind = 'image' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported';
+
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
+const SHEET_EXTENSIONS = new Set(['xlsx', 'xls', 'csv']);
+
+export function attachmentExtension(name?: string | null, url?: string | null): string {
+  const candidates = [name || '', (url || '').split(/[?#]/)[0]];
+  for (const raw of candidates) {
+    const cleaned = raw.trim().toLowerCase();
+    const match = cleaned.match(/\.([a-z0-9]{1,8})$/);
+    if (match) return match[1];
+  }
+  return '';
+}
+
+export function attachmentPreviewKind(name?: string | null, url?: string | null): AttachmentPreviewKind {
+  const ext = attachmentExtension(name, url);
+  if (IMAGE_EXTENSIONS.has(ext)) return 'image';
+  if (ext === 'pdf') return 'pdf';
+  if (ext === 'docx') return 'docx';
+  if (SHEET_EXTENSIONS.has(ext)) return 'xlsx';
+  if (ext === 'pptx') return 'pptx';
+  return 'unsupported';
+}
+
+export function buildAttachmentPreviewUrl(url: string, name: string, basePath = '/portal'): string {
+  const params = new URLSearchParams({ url, name });
+  return `${basePath.replace(/\/$/, '')}/attachment-preview/?${params.toString()}`;
+}
