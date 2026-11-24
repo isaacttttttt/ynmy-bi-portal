@@ -1,3 +1,4 @@
+import { fineDbSchema } from './config/database.js';
 import { ApiError, businessDate, publicUrl } from './http.js';
 
 const METADATA_COLUMNS = `r.report_name AS catalog_name, r.report_type, r.report_total_views AS total_views,
@@ -134,10 +135,54 @@ export async function reportsFor(db, context, dictionary = false, { includeUserV
   return catalogRows.map(row => mapReportRow(row, context, entries, visits.get(row.report_id)));
 }
 
-export async function noticesFor(db, context) {
-  let rows;
+export async function userDeptJobIds(fineDb, context, { env = process.env } = {}) {
+  const schema = fineDbSchema(env);
+  const { rows } = await fineDb.query(
+    `/* portal: finedb user departments */
+     SELECT DISTINCT dep_id
+     FROM (
+       SELECT trim(dr.departmentid::text) AS dep_id
+       FROM ${schema}.fine_user_role_middle urm
+       JOIN ${schema}.fine_user fu ON fu.id = urm.userid
+       JOIN ${schema}.fine_dep_role dr ON dr.id = urm.roleid
+       WHERE fu.username = $1
+         AND fu.enable::text IN ('true', 't')
+         AND ($2::text[] IS NULL OR fu.id::text = ANY($2::text[]))
+         AND urm.roletype = 1
+         AND dr.departmentid IS NOT NULL
+         AND trim(dr.departmentid::text) <> ''
+       UNION
+       SELECT trim(urm.roleid::text) AS dep_id
+       FROM ${schema}.fine_user_role_middle urm
+       JOIN ${schema}.fine_user fu ON fu.id = urm.userid
+       WHERE fu.username = $1
+         AND fu.enable::text IN ('true', 't')
+         AND ($2::text[] IS NULL OR fu.id::text = ANY($2::text[]))
+         AND urm.roletype = 1
+         AND urm.roleid IS NOT NULL
+         AND trim(urm.roleid::text) <> ''
+     ) t`,
+    [context.user.userName, context.user.fineUserIds ?? null],
+  );
+  return rows.map(row => row.dep_id).filter(Boolean);
+}
+
+export async function noticesFor(db, context, { fineDb = null, env = process.env } = {}) {
+  let deptJobIds = null;
   if (Array.isArray(context.user?.oaDeptCodes)) {
-    if (!context.user.oaDeptCodes.length) return [];
+    deptJobIds = context.user.oaDeptCodes;
+  } else if (fineDb) {
+    try {
+      deptJobIds = await userDeptJobIds(fineDb, context, { env });
+    } catch (error) {
+      if (!['42P01', '42703', '3F000', '42501'].includes(error.code)) throw error;
+      context.log?.warn({ stage: 'notice-departments', code: error.code, reason: error.message }, 'finedb user departments unavailable, falling back to dim_bi_user');
+    }
+  }
+
+  let rows;
+  if (Array.isArray(deptJobIds)) {
+    if (!deptJobIds.length) return [];
     ({ rows } = await db.query(
       `SELECT n.* FROM (SELECT DISTINCT n.* FROM fr_index_noticement n
         INNER JOIN (
@@ -151,7 +196,7 @@ export async function noticesFor(db, context) {
         ) n
         ORDER BY CASE WHEN n.notice_is_top IN ('1','是') THEN 1 ELSE 0 END DESC,
           n.notice_register_day_id DESC, n.notice_uuid`,
-      [context.user.oaDeptCodes, businessDate()],
+      [deptJobIds, businessDate()],
     ));
   } else {
     ({ rows } = await db.query(

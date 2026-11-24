@@ -141,7 +141,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
     });
     api.get('/notices', { config: { needTree: false } }, async request => {
       const query = pageQuery(request.query, { defaultSize: 5 });
-      return { success: true, data: paginate(await noticesFor(db, request.portal), query.page, query.pageSize) };
+      return { success: true, data: paginate(await noticesFor(db, request.portal, { fineDb: resolvedFineDb }), query.page, query.pageSize) };
     });
     api.post('/favorites/:entryId', { schema: { body: { type: 'object', required: ['favorite'], additionalProperties: false, properties: { favorite: { type: 'boolean' } } } } }, async request => {
       if (Object.keys(request.query).length) throw invalid();
