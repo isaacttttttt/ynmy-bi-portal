@@ -13,32 +13,26 @@ interface ActivePreview {
   style: CSSProperties;
 }
 
-const PREVIEW_WIDTH = 420;
 const VIEWPORT_MARGIN = 16;
 
 function descriptionText(report: Report) {
   return report.description.trim() || '暂未维护模板介绍';
 }
 
-function computePreviewStyle(element: HTMLElement): CSSProperties {
+function computePreviewStyle(element: HTMLElement): CSSProperties & { '--preview-arrow-left': string } {
   const rect = element.getBoundingClientRect();
-  const maxWidth = Math.min(PREVIEW_WIDTH, window.innerWidth - VIEWPORT_MARGIN * 2);
-  const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - maxWidth - VIEWPORT_MARGIN));
+  const width = Math.min(rect.width, window.innerWidth - VIEWPORT_MARGIN * 2);
+  const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - width - VIEWPORT_MARGIN));
+  const arrowLeft = Math.max(12, Math.min(rect.left + rect.width / 2 - left, width - 12));
   const spaceBelow = window.innerHeight - rect.bottom - VIEWPORT_MARGIN;
   const spaceAbove = rect.top - VIEWPORT_MARGIN;
-  if (spaceBelow < 180 && spaceAbove > spaceBelow) {
-    return {
-      left,
-      bottom: window.innerHeight - rect.top + 8,
-      width: maxWidth,
-      maxHeight: Math.max(120, spaceAbove - 8),
-    };
-  }
+  const above = spaceBelow < 180 && spaceAbove > spaceBelow;
   return {
     left,
-    top: rect.bottom + 8,
-    width: maxWidth,
-    maxHeight: Math.max(120, spaceBelow - 8),
+    width,
+    ...(above ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }),
+    maxHeight: Math.max(120, (above ? spaceAbove : spaceBelow) - 8),
+    '--preview-arrow-left': `${arrowLeft}px`,
   };
 }
 
@@ -125,12 +119,17 @@ export default function WorkbenchModule() {
       </article>
     ))}</div> : <RequestState {...result} />}</ScrollArea>
     {preview && typeof document !== 'undefined' && createPortal(
-      <div id={activeTooltipId} role="tooltip" className="workbench-tooltip-popover" style={preview.style}>
+      <div id={activeTooltipId} role="tooltip" className={`workbench-tooltip-popover${preview.style.bottom ? ' is-above' : ''}`} style={preview.style}>
         <div className="workbench-preview">
-          <strong>{preview.report.name}</strong>
-          <p>{descriptionText(preview.report)}</p>
+          <div className="workbench-preview-copy">
+            <EntryIcon entry={preview.report} />
+            <div>
+              <strong>{preview.report.name}</strong>
+              <p>{descriptionText(preview.report)}</p>
+            </div>
+          </div>
           <div className="workbench-preview-meta">
-            <span>{typeLabel[preview.report.type]}</span>
+            <span className="workbench-preview-type">{typeLabel[preview.report.type]}</span>
             <span className="workbench-preview-domain" aria-label="所属领域">{preview.report.module || '暂未维护所属领域'}</span>
             <span>更新于 {preview.report.updatedOn || '暂未维护'}</span>
           </div>

@@ -5,6 +5,7 @@ import { AppWindow, History, Search, Tag, Hash, X } from 'lucide-react';
 import { message } from 'antd';
 import { request } from '@/lib/portal-api';
 import { searchCategories, searchLabels, searchCatalog, type SearchCategory, type SearchHistory, type SearchItem, type SearchResult } from '@/lib/portal-model';
+import { createSearchHighlighter } from './highlight-search-text';
 import { RequestState, usePortal } from './PortalProvider';
 import ScrollArea from './ScrollArea';
 
@@ -70,13 +71,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'all'
     catch (error) { toast.error((error as Error).message); }
     finally { setClearing(false); }
   }
-  const matchPattern = q ? new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'giu') : null;
-  function highlight(text: string) {
-    if (!matchPattern) return text;
-    return text.split(matchPattern).map((part, index) =>
-      index % 2 ? <span key={index} className="text-red-700">{part}</span> : part,
-    );
-  }
+  const highlight = createSearchHighlighter(q);
   const resultIcons = { report: AppWindow, tag: Tag, metric: Hash };
   return <>{holder}<form ref={anchor} className="portal-search" onSubmit={event => { event.preventDefault(); submit(); }}>
     <Search size={20} aria-hidden="true" /><input ref={field} role="combobox" aria-label="搜索报表" aria-expanded={open} aria-controls="portal-search-results" aria-autocomplete="list" aria-activedescendant={open && active >= 0 ? `portal-search-option-${active}` : undefined} placeholder="搜索报表名称、标签、指标、Owner、数据源…" maxLength={200} value={input} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={event => { setInput(event.target.value); setOpen(true); }} onKeyDown={event => {
