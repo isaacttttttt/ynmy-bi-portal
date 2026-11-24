@@ -100,7 +100,7 @@ button { border:0; background:none; color:inherit; }
 .tone-teal { --tone:#008da8; --tint:#d2f2f8; --card-line:#ace5f4; --card-bg:#f0fcff; }
 .tone-purple { --tone:#7052d5; --tint:#e7e0fa; --card-line:#c9baff; --card-bg:#f8f6ff; }
 .tone-orange { --tone:#ac701c; --tint:#fff1d8; --card-line:#ffdeb0; --card-bg:#fffcf6; }
-.workbench-card { --workbench-title-size:clamp(15px,1.04cqw,20px); --workbench-description-color:#59718f; min-width:0; min-height:180px; padding:14px; background:var(--card-bg); border:1px solid var(--card-line); border-radius:var(--card-radius); display:flex; flex-direction:column; transition:box-shadow .15s,border-color .15s; }
+.workbench-card { --workbench-base-title-size:clamp(15px,1.04cqw,20px); --workbench-title-size:max(var(--workbench-base-title-size),calc(11px / var(--fit-scale,1) + 2px)); --workbench-description-color:#59718f; min-width:0; min-height:180px; padding:14px; background:var(--card-bg); border:1px solid var(--card-line); border-radius:var(--card-radius); display:flex; flex-direction:column; transition:box-shadow .15s,border-color .15s; }
 .workbench-card:hover,.dictionary-card:hover { box-shadow:0 3px 12px #205fa216; border-color:var(--tone); }
 .card-top { display:flex; align-items:center; gap:12px; min-height:44px; }
 .entry-icon { width:48px; height:48px; object-fit:contain; flex-shrink:0; }
@@ -117,9 +117,8 @@ button { border:0; background:none; color:inherit; }
 .card-main h3 { font-size:clamp(15px,1.04cqw,20px); font-weight:600; line-height:1.4; margin:8px 0 4px; color:#111820; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .card-main:hover h3 { color:var(--tone); }
 .card-main p { color:#607fa9; font-size:13px; margin:0; line-height:1.6; }
-.workbench-card .card-main h3,.workbench-card .card-main p { display:block; width:100%; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.workbench-card .card-main h3 { font-size:var(--workbench-title-size); line-height:1.35; margin:4px 0 3px; }
-.workbench-card .card-main p { font-size:calc(var(--workbench-title-size) - 2px); line-height:1.4; color:var(--workbench-description-color); }
+.workbench-card .card-main h3 { display:block; width:100%; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--workbench-title-size); line-height:1.35; margin:4px 0 3px; }
+.workbench-card .card-main p { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; width:100%; overflow:hidden; overflow-wrap:anywhere; font-size:calc(var(--workbench-title-size) - 2px); line-height:1.4; color:var(--workbench-description-color); }
 .workbench-tooltip-popover { position:fixed; z-index:4100; padding:18px 20px; border-radius:16px; background:#1b2c38; box-shadow:0 12px 32px #142b3d38; pointer-events:none; overflow:hidden; }
 .workbench-preview { color:#f5f9fc; overflow-wrap:anywhere; }
 .workbench-preview > strong { display:block; font-size:17px; font-weight:600; line-height:1.5; }
@@ -350,8 +349,8 @@ legend { margin-bottom:12px; font-size:15px; font-weight:600; color:#617fa6; }
 .permission-badge.granted { color:#389e0d; background:#f6ffed; border-color:#b7eb8f; }
 .permission-badge.denied { color:#cf1322; background:#fff1f0; border-color:#ffa39e; }
 
-.workbench-top-eight { display:grid; width:100%; height:100%; grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); container-type:size; }
-.workbench-top-eight .workbench-card { --workbench-title-size:clamp(13px,min(11.5cqh,5.2cqw),19px); min-height:0; overflow:hidden; container-type:size; padding:clamp(8px,3.2cqh,14px) clamp(10px,1cqw,14px); justify-content:space-between; }
+.workbench-top-eight { display:grid; width:100%; height:100%; grid-template-columns:repeat(4,minmax(0,1fr)); grid-auto-rows:max(160px,calc((100% - var(--card-gap)) / 2)); container-type:size; }
+.workbench-top-eight .workbench-card { --workbench-base-title-size:clamp(13px,min(11.5cqh,5.2cqw),19px); min-height:0; overflow:hidden; container-type:size; padding:clamp(8px,3.2cqh,14px) clamp(10px,1cqw,14px); justify-content:space-between; }
 .workbench-top-eight .card-top { min-height:0; gap:clamp(6px,2.8cqw,12px); flex-shrink:0; }
 .workbench-top-eight .entry-icon { width:clamp(24px,24cqh,44px); height:clamp(24px,24cqh,44px); }
 .workbench-top-eight .type-badge { font-size:clamp(11px,8.5cqh,14px); padding:clamp(1px,1.4cqh,3px) clamp(6px,2.6cqw,11px); line-height:1.3; }

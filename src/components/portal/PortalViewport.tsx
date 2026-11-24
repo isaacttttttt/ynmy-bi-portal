@@ -33,7 +33,7 @@ function FitPortalViewport({ children }: { children: ReactNode }) {
   const fitHeight = Math.max(800, size.height / scale);
   return <div ref={viewport} className="portal-viewport" data-display-mode="fit">
     <div className="portal-frame is-scaled" style={{ width: designWidth * scale, height: fitHeight * scale }}>
-      <div className="portal-canvas" style={{ width: designWidth, transform: `scale(${scale})`, '--fit-height': `${fitHeight}px` } as CSSProperties}>{children}</div>
+      <div className="portal-canvas" style={{ width: designWidth, transform: `scale(${scale})`, '--fit-height': `${fitHeight}px`, '--fit-scale': scale } as CSSProperties}>{children}</div>
     </div>
   </div>;
 }
