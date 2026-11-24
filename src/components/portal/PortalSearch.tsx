@@ -70,6 +70,13 @@ export default function PortalSearch({ query, category: selectedCategory = 'all'
     catch (error) { toast.error((error as Error).message); }
     finally { setClearing(false); }
   }
+  const matchPattern = q ? new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'giu') : null;
+  function highlight(text: string) {
+    if (!matchPattern) return text;
+    return text.split(matchPattern).map((part, index) =>
+      index % 2 ? <span key={index} className="text-red-700">{part}</span> : part,
+    );
+  }
   const resultIcons = { report: AppWindow, tag: Tag, metric: Hash };
   return <>{holder}<form ref={anchor} className="portal-search" onSubmit={event => { event.preventDefault(); submit(); }}>
     <Search size={20} aria-hidden="true" /><input ref={field} role="combobox" aria-label="搜索报表" aria-expanded={open} aria-controls="portal-search-results" aria-autocomplete="list" aria-activedescendant={open && active >= 0 ? `portal-search-option-${active}` : undefined} placeholder="搜索报表名称、标签、指标、Owner、数据源…" maxLength={200} value={input} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={event => { setInput(event.target.value); setOpen(true); }} onKeyDown={event => {
@@ -90,7 +97,7 @@ export default function PortalSearch({ query, category: selectedCategory = 'all'
       {historyError ? <div className="search-empty" role="alert">{historyError}<button className="text-button" onClick={() => setAttempt(n => n + 1)}>重试</button></div> : history.items.length ? <div className="search-history-chips">{history.items.map(item => <button key={item.query} type="button" title={item.query} onClick={() => { setInput(item.query); submit(item.query); }}><History size={15} /><span>{item.query}</span></button>)}</div> : <p className="search-empty">暂无搜索记录</p>}
       <div className="search-section-title"><span>{q ? `搜索结果 · ${searchLabels[category]}` : category === 'all' ? '最近打开及相关标签、指标' : category === 'report' ? '最近打开的报表' : `最近打开报表的${searchLabels[category]}`}</span>{q && data && <span>{data.total} 项</span>}</div>
       <div id="portal-search-results" role="listbox" aria-label={`${searchLabels[category]}搜索结果`} aria-busy={loading}>
-        {items.map((item, index) => { const ResultIcon = resultIcons[item.category]; return <button type="button" role="option" id={`portal-search-option-${index}`} aria-selected={active === index} className="search-result-row" key={`${item.category}:${item.report?.id || item.value}`} onClick={() => choose(item)}><span className="search-result-icon"><ResultIcon size={21} /></span><span className="search-result-copy"><strong>{item.value}</strong><small>{item.subtitle}</small></span><span className="search-result-badge">{searchLabels[item.category]}</span></button>; })}
+        {items.map((item, index) => { const ResultIcon = resultIcons[item.category]; return <button type="button" role="option" id={`portal-search-option-${index}`} aria-selected={active === index} className="search-result-row" key={`${item.category}:${item.report?.id || item.value}`} onClick={() => choose(item)}><span className="search-result-icon"><ResultIcon size={21} /></span><span className="search-result-copy"><strong>{highlight(item.value)}</strong><small>{highlight(item.subtitle)}</small></span><span className="search-result-badge">{searchLabels[item.category]}</span></button>; })}
       </div>
       {loading ? <RequestState loading /> : error ? <div className="search-empty" role="alert">{error}<button className="text-button" onClick={() => { setAttempt(n => n + 1); if (!q) workbench.retry(); }}>重试</button></div> : !items.length && <p className="search-empty">{q ? '没有匹配结果，请换个关键词' : '暂无最近打开的报表'}</p>}
       {q && !!data?.total && <button type="button" className="search-all" onClick={() => submit()}>查看全部相关报表</button>}
