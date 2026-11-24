@@ -16,6 +16,10 @@ interface ActivePreview {
 const PREVIEW_WIDTH = 420;
 const VIEWPORT_MARGIN = 16;
 
+function descriptionText(report: Report) {
+  return report.description.trim() || '暂未维护模板介绍';
+}
+
 function computePreviewStyle(element: HTMLElement): CSSProperties {
   const rect = element.getBoundingClientRect();
   const maxWidth = Math.min(PREVIEW_WIDTH, window.innerWidth - VIEWPORT_MARGIN * 2);
@@ -115,7 +119,7 @@ export default function WorkbenchModule() {
         <div className="card-top"><EntryIcon entry={report} /><span className="type-badge">{typeLabel[report.type]}</span><FavoriteButton entry={report} /></div>
         <button className="card-main" aria-describedby={activeId === report.id ? activeTooltipId : undefined} onClick={() => { clearPreview(); open(report); }}>
           <h3>{report.name}</h3>
-          <p>{report.description}</p>
+          <p>{descriptionText(report)}</p>
         </button>
         <div className="card-foot"><span>{tab === 'frequent' ? <ChartNoAxesCombined size={13} /> : <Clock size={13} />}{tab === 'frequent' ? '近30天访问' : '最近访问'}</span><strong>{tab === 'frequent' ? `${report.visits30d} 次` : report.lastVisitedOn || '暂无记录'}</strong></div>
       </article>
@@ -124,7 +128,7 @@ export default function WorkbenchModule() {
       <div id={activeTooltipId} role="tooltip" className="workbench-tooltip-popover" style={preview.style}>
         <div className="workbench-preview">
           <strong>{preview.report.name}</strong>
-          <p>{preview.report.description || '暂未维护看板介绍'}</p>
+          <p>{descriptionText(preview.report)}</p>
           <div className="workbench-preview-meta">
             <span>{typeLabel[preview.report.type]}</span>
             <span className="workbench-preview-domain" aria-label="所属领域">{preview.report.module || '暂未维护所属领域'}</span>
