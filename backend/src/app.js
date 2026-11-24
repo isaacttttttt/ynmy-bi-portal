@@ -25,7 +25,7 @@ function cacheTtlMs(raw, fallbackSeconds, name) {
 export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
   const ownsFineDb = fineDb === undefined;
   const resolvedFineDb = fineDb ?? createFineDbPool(process.env) ?? db;
-  platform ||= platformClient(process.env, db);
+  platform ||= platformClient(process.env, resolvedFineDb);
   const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
   const rootId = process.env.FINE_ROOT_ID || '';
   const { reportsFor, noticesFor, quickEntries, bootstrapDate } = sourceRepository;

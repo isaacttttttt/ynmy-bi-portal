@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { buildApp } from '../src/app.js';
+import { fineDbSchema } from '../src/config/database.js';
 import { platformClient } from '../src/platform.js';
 
 const db = new pg.Client({ connectionString: process.env.SOURCE_TEST_DATABASE_URL });
@@ -15,12 +16,14 @@ const logFile = join(dir, 'portal.log');
 let app, upstream;
 try {
   await db.query('BEGIN');
-  const { rows: [user] } = await db.query(`SELECT u.id,u.username FROM dim_bi_user u
-    WHERE u.enable='true' AND u.id<>u.username AND EXISTS
+  const schema = fineDbSchema();
+  const { rows: [user] } = await db.query(`SELECT u.id::text,u.username FROM ${schema}.fine_user u
+    WHERE u.enable::text IN ('true', 't') AND u.id::text<>u.username AND EXISTS
       (SELECT 1 FROM dim_bi_visit_log v JOIN dim_bi_report_info_dtl r USING(report_id)
        WHERE v.user_code=u.username) LIMIT 1`);
   assert(user, 'Need a user with username-based visit logs');
-  const { rows: [other] } = await db.query("SELECT id,username FROM dim_bi_user WHERE enable='true' AND id<>$1 LIMIT 1", [user.id]);
+  const { rows: [other] } = await db.query(`SELECT id::text,username FROM ${schema}.fine_user
+    WHERE enable::text IN ('true', 't') AND id::text<>$1 LIMIT 1`, [user.id]);
   const { rows: entries } = await db.query(`SELECT DISTINCT v.report_id AS id FROM dim_bi_visit_log v
     JOIN dim_bi_report_info_dtl r USING(report_id) WHERE v.user_code=$1 LIMIT 3`, [user.username]);
   assert(entries.length > 0);
@@ -30,7 +33,7 @@ try {
       ? entries.map(e => ({ ...e, pId: null, text: 'Report', path: 'report.cpt' })) : [] }));
   });
   await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
-  const env = { FINE_BASE_URL: `http://127.0.0.1:${upstream.address().port}`, FINE_IDENTITY_MODE: 'trusted-cookie' };
+  const env = { FINE_BASE_URL: `http://127.0.0.1:${upstream.address().port}`, FINE_IDENTITY_MODE: 'trusted-cookie', FINEDB_SCHEMA: schema };
   Object.assign(process.env, { PUBLIC_ORIGIN: 'https://portal-test.invalid', FINE_ROOT_ID: entries[0].id,
     PORTAL_DATA_MODEL: 'source', PORTAL_LOG_FILE: logFile });
   delete process.env.POC_PLATFORM_URL;

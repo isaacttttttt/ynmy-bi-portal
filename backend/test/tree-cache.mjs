@@ -19,7 +19,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const env = { FINE_BASE_URL: `http://127.0.0.1:${server.address().port}`, FINE_TREE_PATH: '/tree',
   FINE_FAVORITES_PATH: '/favorites', FINE_IDENTITY_MODE: 'trusted-cookie' };
 let lookups = 0;
-const db = { query: async () => { lookups++; return { rows: [{ userName: 'user', name: 'User' }] }; } };
+const db = { query: async () => { lookups++; return { rows: [{ id: 'id', userName: 'user', name: 'User' }] }; } };
 const logger = { child() { return this; }, info(fields) { logs.push(fields); }, error(fields) { logs.push(fields); } };
 const request = token => ({ headers: { cookie: `fine_login_users=id; fine_auth_token=${token}` }, log: logger });
 const count = token => calls.get(token + '/tree') || 0;

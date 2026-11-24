@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { serialize } from 'node:v8';
+import { fineDbSchema } from './config/database.js';
 import { ApiError, cookieToken, publicUrl } from './http.js';
 import { createTtlCache } from './ttl-cache.js';
 
@@ -12,14 +13,15 @@ function parseTtlMs(raw, fallbackSeconds, label) {
   return ms;
 }
 
-export function platformClient(env = process.env, db) {
+export function platformClient(env = process.env, fineDb) {
   const base = new URL(env.FINE_BASE_URL);
   if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw new Error('Invalid FINE_BASE_URL');
   const sessionPath = env.FINE_SESSION_PATH;
   const identityMode = env.FINE_IDENTITY_MODE || 'session';
   if (!['session', 'trusted-cookie'].includes(identityMode)) throw new Error('Invalid FINE_IDENTITY_MODE');
   if (identityMode === 'session' && !sessionPath) throw new Error('FINE_SESSION_PATH must identify the verified session endpoint');
-  if (identityMode === 'trusted-cookie' && !db) throw new Error('Database required for trusted-cookie identity');
+  if (identityMode === 'trusted-cookie' && !fineDb) throw new Error('FineDB required for trusted-cookie identity');
+  const userSchema = identityMode === 'trusted-cookie' ? fineDbSchema(env) : null;
   const paths = {
     ...(identityMode === 'session' ? { session: sessionPath } : {}),
     tree: env.FINE_TREE_PATH || '/v10/view/entry/tree',
@@ -59,7 +61,6 @@ export function platformClient(env = process.env, db) {
   const identityCache = createTtlCache({ ttlMs: identityTtlMs, maxEntries: 5000 });
   const roleListCache = createTtlCache({ ttlMs: rolesTtlMs, maxEntries: 2000 });
   let cachedBytes = 0;
-  let userQueryMode = 'dept';
 
   async function call(token, path, method = 'GET', log, operation) {
     const started = Date.now();
@@ -149,33 +150,6 @@ export function platformClient(env = process.env, db) {
     return pending;
   }
 
-  async function queryTrustedUserRows(identity) {
-    const run = async mode => {
-      const cols = mode === 'dept'
-        ? 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name, oa_dept_code AS "oaDeptCode"'
-        : 'username AS "userName", coalesce(nullif(realname,\'\'),username) AS name';
-      const { rows } = await db.query(
-        `SELECT DISTINCT ${cols}
-         FROM dim_bi_user WHERE id=ANY($1::text[]) AND enable='true'
-           AND ($2::text IS NULL OR username=$2)`,
-        [identity.ids, identity.username],
-      );
-      return { rows, mode };
-    };
-    const modes = userQueryMode === 'dept' ? ['dept', 'basic'] : ['basic'];
-    for (let i = 0; i < modes.length; i++) {
-      try {
-        const res = await run(modes[i]);
-        userQueryMode = modes[i];
-        return res;
-      } catch (error) {
-        if (error.code === '42703' && i < modes.length - 1) continue;
-        throw error;
-      }
-    }
-    throw upstreamError();
-  }
-
   async function resolveUser(token, userCookie, log) {
     const cacheKey = createHash('sha256').update(identityMode === 'trusted-cookie' ? `${token}\0${userCookie}` : token).digest('hex');
     const loader = async () => {
@@ -186,27 +160,20 @@ export function platformClient(env = process.env, db) {
       }
       const identity = platformIdentity(token, userCookie);
       log?.info({ stage: 'identity', mode: identityMode, candidateCount: identity.ids.length }, 'identity parsed');
-      const { rows, mode } = await queryTrustedUserRows(identity);
-      const distinctUsers = new Map();
-      const deptCodes = new Set();
-      let hasDeptColumn = false;
-      for (const row of rows) {
-        if (!row || typeof row.userName !== 'string' || !row.userName) continue;
-        if (!distinctUsers.has(row.userName)) distinctUsers.set(row.userName, row.name);
-        if (Object.hasOwn(row, 'oaDeptCode')) {
-          hasDeptColumn = true;
-          if (typeof row.oaDeptCode === 'string' && row.oaDeptCode.trim()) deptCodes.add(row.oaDeptCode.trim());
-        }
-      }
-      log?.info({ stage: 'identity', matchedUsers: distinctUsers.size, username: distinctUsers.size === 1 ? [...distinctUsers.keys()][0] : undefined }, 'identity lookup');
-      if (distinctUsers.size !== 1) throw new ApiError(403, 'USER_UNAVAILABLE', '平台用户未同步或已停用');
-      const [[userName, name]] = [...distinctUsers.entries()];
-      if (!userName || userName.length > 128 || typeof name !== 'string') throw upstreamError();
-      return {
-        userName,
-        name,
-        ...(mode !== 'basic' && hasDeptColumn ? { oaDeptCodes: [...deptCodes] } : {}),
-      };
+      const { rows } = await fineDb.query(
+        `SELECT DISTINCT id::text AS id, username AS "userName", coalesce(nullif(realname, ''), username) AS name
+         FROM ${userSchema}.fine_user
+         WHERE id::text = ANY($1::text[]) AND enable::text IN ('true', 't')
+           AND ($2::text IS NULL OR username = $2)`,
+        [identity.ids, identity.username],
+      );
+      const users = rows.filter(row => typeof row.userName === 'string' && row.userName);
+      const usernames = new Set(users.map(row => row.userName));
+      log?.info({ stage: 'identity', matchedUsers: usernames.size, username: usernames.size === 1 ? users[0].userName : undefined }, 'identity lookup');
+      if (usernames.size !== 1) throw new ApiError(403, 'USER_UNAVAILABLE', '帆软账号无法识别或已停用');
+      const [{ userName, name }] = users;
+      if (userName.length > 128 || typeof name !== 'string') throw upstreamError();
+      return { userName, name, fineUserIds: users.map(row => row.id) };
     };
     if (!identityTtlMs) return loader();
     return identityCache.getOrLoad(cacheKey, loader, {
@@ -279,7 +246,7 @@ export function platformClient(env = process.env, db) {
       log?.info({ stage: 'identity', mode: identityMode, tokenCookie: cookieName, userCookie: userCookieName, needTree }, 'resolving identity');
       const token = cookieToken(request, cookieName);
       const userCookie = identityMode === 'trusted-cookie' ? cookieToken(request, userCookieName) : '';
-      // Validate cookie format synchronously before any upstream/DB work.
+      // The gateway validates the cookie binding. Reject malformed identity cookies before any platform or database calls.
       if (identityMode === 'trusted-cookie') platformIdentity(token, userCookie);
       if (needTree) {
         if (identityMode === 'trusted-cookie') {

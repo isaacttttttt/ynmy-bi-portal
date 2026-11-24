@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { createFineDbPool } from '../src/config/database.js';
+import { createFineDbPool, fineDbSchema } from '../src/config/database.js';
 import { platformClient } from '../src/platform.js';
 import { buildApp } from '../src/app.js';
 import {
   availableReportsForRole,
   buildAuthorityObjectIndex,
-  fineDbSchema,
   inferReportTypeFromAuthorityObject,
   parseUserRoleIds,
   resolveAllowedReportsFromTree,

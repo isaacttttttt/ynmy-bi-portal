@@ -10,7 +10,7 @@ psql -h 数据库主机 -p 数据库端口 -U 数据库管理员 -d finedb_ext -
 
 | 查询用途 | 索引字段 |
 |---|---|
-| Cookie 用户 ID 对应平台用户 | dim_bi_user(id) |
+| 公告可见范围关联当前平台用户 | dim_bi_user(id) |
 | 当前 username 对应 OA 部门 | dim_bi_user(username) |
 | 目录与字典关联 | 两表各自的 report_id |
 | 授权报表的访问日志与日期范围 | dim_bi_visit_log(report_id, day_id) |

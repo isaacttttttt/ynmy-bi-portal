@@ -59,3 +59,10 @@ export function createFineDbPool(env = process.env) {
     label: 'FINEDB',
   });
 }
+
+export function fineDbSchema(env = process.env) {
+  const fallback = env.FINEDB_HOST ? 'public' : 'finedb';
+  const name = (env.FINEDB_SCHEMA || fallback).trim();
+  if (!/^[a-z_][a-z0-9_]*$/i.test(name)) throw new Error('Invalid FINEDB_SCHEMA');
+  return name;
+}

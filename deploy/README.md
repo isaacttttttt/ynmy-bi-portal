@@ -38,8 +38,8 @@ tail -f logs/portal.log
 | `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD` | 容器可访问的 PostgreSQL 地址与账号；不要把宿主机数据库写成容器内的 localhost |
 | `DB_STATEMENT_TIMEOUT_MS` | PostgreSQL 单条读写 SQL 的超时，默认 `60000` 毫秒，驱动多留 5 秒接收数据库响应 |
 | `FINE_BASE_URL` | 后端请求帆软的平台根地址，例如 `http://finebi.internal:8080/WebReport/ReportServer` |
-| `FINE_IDENTITY_MODE` | 交付配置为 `trusted-cookie`，按客户主平台校验后的 Cookie 映射身份；也保留 `session` 模式 |
-| `FINE_USER_COOKIE_NAME` | 默认 `fine_login_users`，其值对应 `dim_bi_user.id` |
+| `FINE_IDENTITY_MODE` | 客户部署使用 `trusted-cookie`，根据网关校验后的 Cookie 实时查 FineDB；`session` 调用已验证的会话接口 |
+| `FINE_USER_COOKIE_NAME` | 默认 `fine_login_users`，其值对应 FineDB 的 `fine_user.id` |
 | `FINE_SESSION_PATH` | 仅 `session` 模式使用；`trusted-cookie` 模式无需填写 |
 | `FINE_TREE_PATH` | 当前用户有权限的目录列表 |
 | `FINE_FAVORITES_PATH` | 当前用户的收藏列表 |
@@ -54,7 +54,7 @@ tail -f logs/portal.log
 
 后端接口路径以 `/` 开头时，追加到 `FINE_BASE_URL` 后面；也可以填写完整 HTTP(S) 地址。不要在地址中嵌入用户名、密码或固定用户 token。后端会把当前登录 token 作为 `Authorization: Bearer ...` 转发到配置的接口，因此这些地址必须属于客户可信平台。
 
-本客户采用 `fine_login_users → dim_bi_user.id → username`。Cookie 可包含逗号分隔的多个历史用户 ID：多用户时读取当前 token 的 `sub`，在 ID 列表中匹配 `dim_bi_user.username`，不会默认选择第一个。token 的校验仍由主平台承担。仅接受启用（`enable='true'`）且唯一匹配的用户。访问日志关联明确为 `dim_bi_visit_log.user_code = dim_bi_user.username`；公告权限、搜索历史也使用 username。目录、收藏继续用 `fine_auth_token` 调用平台。
+客户门户使用 `fine_login_users → FineDB fine_user.id → username` 识别当前账号。Cookie 有多个历史 ID 时，用当前 token 的 `sub` 匹配 FineDB 中的启用账号，并且要求用户名唯一。门户用这个用户名关联访问日志的 `user_code`、公告部门与搜索历史。目录和收藏使用 `fine_auth_token` 调用帆软平台。
 
 快捷入口直接读取 `fr_quick_entry_app.icon_url`，先显示本地图标，再懒加载该 URL；失败保留本地图标。`icon_repository` 是填报侧维护图标的来源，门户无需拼接固定路径。`FINE_ICON_URL_TEMPLATE` 仅作为报表卡片的可选图标模板，与快捷入口图标无关。
 
@@ -72,12 +72,12 @@ PORTAL_THEMATIC_CACHE_TTL_SECONDS=60
 PORTAL_CATALOG_CACHE_TTL_SECONDS=60
 ```
 
-- `FINE_IDENTITY_CACHE_TTL_SECONDS`：按会话（token + 用户 Cookie）缓存单次查出的 `dim_bi_user`（含 `username`、`role_id`、`oa_dept_code`），并发请求自动合并，设为 `0` 可关闭持久缓存。
+- `FINE_IDENTITY_CACHE_TTL_SECONDS`：`trusted-cookie` 按 token 和用户 Cookie 缓存 FineDB 账号，`session` 按 token 缓存会话身份。并发请求会合并，设为 `0` 可关闭身份缓存。
 - `FINE_ROLES_CACHE_TTL_SECONDS`：按会话缓存 `/v10/roles` 分页与搜索结果，同时 `/notices`、`/search-history` 和 `/role-thematic/*` 按需跳过 `/v10/view/entry/tree` 拉取。
 - `PORTAL_THEMATIC_CACHE_TTL_SECONDS`：按 `role_id` 跨用户共享缓存角色专题目录树，管理员点击“保存”时立即失效对应角色缓存；用户可见报表仍按当前会话权限实时交集过滤。
 - `PORTAL_CATALOG_CACHE_TTL_SECONDS`：跨用户共享缓存 T+1 公共字典元数据、目录元数据、快捷入口及日志截止日（不含任何个人权限或个人访问记录），设为 `0` 可关闭。
 
-每个门户节点独立缓存。同一登录 token 的并发 tree 请求合并为一次调用，成功后最多保留 60 秒；缓存命中不会延长有效期。到期自动清理，下次访问重新获取；刷新失败不使用过期权限。权限变更或会话撤销最多延迟约 60 秒感知。用户状态查询和收藏接口仍逐次执行。
+每个门户节点独立缓存。同一登录 token 的并发 tree 请求合并为一次调用，成功后最多保留 60 秒；缓存命中不会延长有效期。到期自动清理，下次访问重新获取；刷新失败不使用过期权限。账号状态在身份缓存到期后重新查询，收藏接口逐次调用平台。
 
 每个节点默认限制目录的序列化数据总量为 512 MiB，按需使用，不预分配。`FINE_TREE_CACHE_MAX_ENTRIES=0` 表示不额外限制会话数量；如填写正整数，则同时启用数量上限。触及配置上限时淘汰最久未使用的会话。单份目录超过预算时直接返回、不缓存。这个预算不是 Node.js 堆内存或容器内存硬上限；HTTP 请求和业务查询也需要工作内存。
 
@@ -96,10 +96,10 @@ grep '请求ID' logs/portal.log
 
 `trusted-cookie` 模式依赖客户主平台或网关在转发门户 API 前校验两个 Cookie 的有效性及同一用户绑定，并阻止请求绕过该校验直达容器。门户不自行验证主平台 Cookie 签名；tree 接口成功只证明 token 有效，不单独证明 ID Cookie 与 token 属于同一人。此项是客户确认的接入前提，部署时需覆盖 `/portal/api/portal/` 路由。
 
-如果以后改用 `FINE_IDENTITY_MODE=session`，再填写可信的 `FINE_SESSION_PATH`。该接口须返回：
+使用 `FINE_IDENTITY_MODE=session` 时，`FINE_SESSION_PATH` 指向校验当前 token 并返回当前启用账号的接口。响应格式如下。
 
 ```json
-{"data":{"userName":"dim_bi_user.username 对应值","name":"显示名称"}}
+{"data":{"userName":"当前帆软用户名","name":"显示名称"}}
 ```
 
 目录和收藏继续使用参考项目的数据协议：
@@ -169,4 +169,4 @@ GRANT SELECT ON fine_user, fine_user_role_middle, fine_custom_role,
 
 快捷入口无用户权限过滤，仅显示 `status=1`，按 `sort_no` 升序、相同排序号按 `app_id` 排序。最新附件的两条快捷入口都是 `status=0`；是否启用由填报维护。
 
-公告权限按当前 `username → dim_bi_user.oa_dept_code = dim_dept_mapping.dept_job_id → dept_name` 关联。`notice_dept_name` 为逗号分隔部门列表，拆分后精确 INNER JOIN，重复匹配的公告只显示一次；继续遵守公告生效和过期日期。
+公告权限按当前 `username → dim_bi_user.oa_dept_code = dim_dept_mapping.dept_job_id → dept_name` 关联。可信 Cookie 模式也会用 FineDB 查出的当前用户 ID 限定部门记录。`notice_dept_name` 为逗号分隔部门列表，按部门名精确匹配，同时检查生效和过期日期。

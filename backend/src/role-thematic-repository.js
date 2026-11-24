@@ -1,15 +1,8 @@
 import { ApiError } from './http.js';
+import { fineDbSchema } from './config/database.js';
 import { validateRoleThematicNodes } from '../../src/lib/portal-model.ts';
 
-const VALID_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
 const VALID_TYPES = new Set(['bi', 'fvs', 'frm', 'cpt', 'url']);
-
-export function fineDbSchema(env = process.env) {
-  const fallback = env.FINEDB_HOST ? 'public' : 'finedb';
-  const name = (env.FINEDB_SCHEMA || fallback).trim();
-  if (!VALID_IDENTIFIER.test(name)) throw new Error('Invalid FINEDB_SCHEMA');
-  return name;
-}
 
 function normalizeReportType(value) {
   const lowered = typeof value === 'string' ? value.trim().toLowerCase() : '';

@@ -20,6 +20,13 @@ const env = { FINE_BASE_URL: base + '/customer', FINE_SESSION_PATH: '/session', 
   FINE_FAVORITES_PATH: base + '/different/favorites', FINE_FAVORITE_ADD_PATH: '/saved/{entryId}', FINE_FAVORITE_ADD_METHOD: 'PUT',
   FINE_FAVORITE_REMOVE_PATH: '/saved/{entryId}', FINE_FAVORITE_REMOVE_METHOD: 'DELETE', FINE_COOKIE_NAME: 'customer_token',
   FINE_BROWSER_BASE_URL: '/WebReport/ReportServer', FINE_ENTRY_ACCESS_PATH: '/open/{entryId}', FINE_ICON_URL_TEMPLATE: '/files/imgs/{entryId}.png' };
+const db = {
+  async query(sql) {
+    assert.doesNotMatch(sql, /\bdim_bi_user\b/, 'Portal identity must not query the business user dimension');
+    return { rows: sql.includes('max(day_id)') ? [{ day: '2026-11-05' }] : [] };
+  },
+  async end() {},
+};
 let app;
 try {
   const platform = platformClient(env);
@@ -33,9 +40,10 @@ try {
   assert.throws(() => platformClient({ ...env, FINE_TREE_PATH: '//other.example/tree' }));
   process.env.PUBLIC_ORIGIN = 'https://customer.example'; process.env.FINE_ROOT_ID = 'report-1';
   process.env.POC_PLATFORM_URL = 'http://127.0.0.1:1';
-  app = await buildApp({ platform, db: { query: async sql => ({ rows: sql.includes('max(day_id)') ? [{ day: '2026-11-05' }] : [] }), end: async () => {} } });
+  app = await buildApp({ platform, db });
   const response = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: { cookie: 'customer_token=verified-token' } });
   assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().data.user, { name: 'Test' });
   assert.deepEqual(response.json().data.platform, { entryAccessUrl: '/WebReport/ReportServer/open/{entryId}', biServiceName: 'dec.service.frame.tab_pane', biTabType: 'bi.subject.publink' });
   assert(!response.body.includes('verified-token')); assert(!response.body.includes(base));
   const redirect = await app.inject('/portal?q=hello');
@@ -56,5 +64,25 @@ try {
     assert.equal((await app.inject(url)).statusCode, 404, url);
   }
   assert.equal((await app.inject({ method: 'POST', url: '/poc/login', payload: {} })).statusCode, 404);
-  console.log('PASS: custom endpoints, methods, cookie, icon template, public runtime config and permission filtering.');
+  await app.close();
+  app = null;
+
+  Object.assign(process.env, env, { FINE_IDENTITY_MODE: 'trusted-cookie', FINEDB_SCHEMA: 'fixture_finedb' });
+  const fineDb = {
+    async query(sql, params) {
+      if (sql === 'SELECT 1' || sql.includes('fixture_finedb.fine_user_role_middle')) return { rows: [] };
+      assert.match(sql, /FROM fixture_finedb\.fine_user\b/);
+      assert.deepEqual(params, [['fine-user-id'], null]);
+      return { rows: [{ id: 'fine-user-id', userName: 'new-fine-user', name: 'FineDB New User' }] };
+    },
+  };
+  app = await buildApp({ db, fineDb });
+  calls.length = 0;
+  const realtimeUser = await app.inject({ url: '/portal/api/portal/v1/bootstrap', headers: {
+    cookie: 'customer_token=verified-token; fine_login_users=fine-user-id',
+  } });
+  assert.equal(realtimeUser.statusCode, 200, realtimeUser.body);
+  assert.deepEqual(realtimeUser.json().data.user, { name: 'FineDB New User' });
+  assert.deepEqual(calls, [['GET', '/customer/tree'], ['GET', '/different/favorites']]);
+  console.log('PASS: custom endpoints, cookie, icon template, session and FineDB identities, base path and permission filtering.');
 } finally { if (app) await app.close(); await new Promise(resolve => server.close(resolve)); }

@@ -7,7 +7,7 @@
 - 基础路径：`/portal/api/portal/v1`，通过 `NEXT_PUBLIC_PORTAL_API_BASE` 指定。
 - 前端静态导出，由帆软页面以 iframe 嵌入。推荐门户、BFF、帆软通过反向代理同源部署。
 - 身份来自服务端验证的当前平台会话。请求使用 `credentials: include`，不接收浏览器自报的 `userId` 或权限集合。不把平台 token 写入 URL、localStorage 或日志。
-- 客户的 `trusted-cookie` 模式沿用主平台校验：`fine_login_users` 对应 `dim_bi_user.id`；包含多个 ID 时，用当前 token 的 `sub` 匹配其中用户的 `username`。访问记录通过 `dim_bi_visit_log.user_code = dim_bi_user.username` 查询。
+- `trusted-cookie` 模式由主平台校验会话与 Cookie 绑定，门户根据 `fine_login_users` 查询 FineDB 的 `fine_user.id`。包含多个 ID 时，用当前 token 的 `sub` 匹配启用账号的 `username`。`session` 模式直接取得会话接口校验后的用户。访问记录使用当前用户名匹配 `dim_bi_visit_log.user_code`。
 - 写请求须由 BFF 校验同源 Origin / CSRF，CORS 不得使用通配来源并允许携带凭据。
 - ID 均为字符串：`Entry.id` 是帆软目录/模板入口 ID；`Report.metadataId` 是底表自增主键，不能混用。BI 的 `templateId` 是发布任务 ID，不是入口 ID。
 - 日期使用 `YYYY-MM-DD`，精确时间若以后提供则使用带时区的 ISO 8601。业务日期以 Asia/Shanghai 计算。不存在的日期返回 `null`，不可伪造时间。
@@ -34,7 +34,7 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 
 1. 基于 tree 的实际返回项构造可见入口 ID 集合。拿到目录本身不等于得到所有未返回子项的权限。
 2. 最近、常用、收藏与此集合取交集。报表字典以 `dim_bi_report_dictionary` 为主表，LEFT JOIN `dim_bi_report_info_dtl`，根据 `report_id` 是否在此集合中标记 `granted/denied`，未授权字典记录也展示。专题仅返回配置的 `rootId` 下已授权的所有层级。权限集合必须来自完整授权树，不能只用专题子树过滤全站公告和字典。
-3. 客户底表模式的公告使用当前 username 定位启用的 `dim_bi_user`，再按 `oa_dept_code = dim_dept_mapping.dept_job_id` INNER JOIN。映射得到的 `dept_name` 与公告 `notice_dept_name` 拆分后的部门名称精确匹配；不依赖 tree 权限。重复部门映射不重复返回公告。
+3. 公告使用当前 username 定位启用的 `dim_bi_user`。可信 Cookie 模式同时限定 FineDB 识别出的用户 ID。再按 `oa_dept_code = dim_dept_mapping.dept_job_id` 取得部门，与公告 `notice_dept_name` 拆分后的部门名称精确匹配。重复部门映射不重复返回公告。
 4. 公告同时检查生效时间、过期时间；置顶不绕过权限和有效期。日期边界需使用上海业务日，结束日当天包含在内。
 5. 搜索下拉层仍只检索授权报表；字典页的检索、筛选计数、排序和分页覆盖字典全部记录，可按权限状态筛选。单条打开、收藏写入也必须重新鉴权。
 

@@ -15,7 +15,7 @@ const server = createServer((req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const env = { FINE_BASE_URL: `http://127.0.0.1:${server.address().port}`, FINE_IDENTITY_MODE: 'trusted-cookie' };
-const db = { query: async () => ({ rows: [{ userName: 'user', name: 'User' }] }) };
+const db = { query: async () => ({ rows: [{ id: 'id', userName: 'user', name: 'User' }] }) };
 const log = { child() { return this; }, info(fields) { if (fields.result === 'stored') retained = fields; }, error() {} };
 const req = i => ({ headers: { cookie: `fine_login_users=id; fine_auth_token=benchmark-${i}` }, log });
 const warmup = platformClient(env, db), measured = platformClient(env, db);

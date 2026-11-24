@@ -160,6 +160,7 @@ export async function noticesFor(db, context) {
           SELECT DISTINCT trim(m.dept_name) AS dept_name
           FROM dim_bi_user u INNER JOIN dim_dept_mapping m ON trim(u.oa_dept_code)=trim(m.dept_job_id)
           WHERE u.username=$1 AND u.enable='true'
+            AND ($3::text[] IS NULL OR u.id::text=ANY($3::text[]))
         ) departments ON departments.dept_name IN
           (SELECT trim(value) FROM unnest(string_to_array(n.notice_dept_name,',')) AS value)
         WHERE nullif(trim(n.notice_start_day_id),'')::date <= $2::date
@@ -167,7 +168,7 @@ export async function noticesFor(db, context) {
         ) n
         ORDER BY CASE WHEN n.notice_is_top IN ('1','是') THEN 1 ELSE 0 END DESC,
           n.notice_register_day_id DESC, n.notice_uuid`,
-      [context.user.userName, businessDate()],
+      [context.user.userName, businessDate(), context.user.fineUserIds ?? null],
     ));
   }
   return rows.map(row => ({
