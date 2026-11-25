@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { Modal, Tooltip, message } from 'antd';
 import {
   AlertTriangle,
@@ -54,6 +54,18 @@ interface FlatTreeRow {
   hasChildren: boolean;
   siblingIndex: number;
   siblingCount: number;
+}
+
+const ROLE_ROW_HEIGHT = 42;
+const ROLE_ROW_GAP = 4;
+const ROLE_LIST_TOP_PAD = 10;
+const ROLE_PAGE_SIZE_MIN = 5;
+const ROLE_PAGE_SIZE_MAX = 50;
+
+function calcRolePageSize(containerHeight: number) {
+  const usable = Math.max(0, containerHeight - ROLE_LIST_TOP_PAD);
+  const fit = Math.floor((usable + ROLE_ROW_GAP) / (ROLE_ROW_HEIGHT + ROLE_ROW_GAP));
+  return Math.max(ROLE_PAGE_SIZE_MIN, Math.min(ROLE_PAGE_SIZE_MAX, fit));
 }
 
 function createNodeId() {
@@ -162,6 +174,53 @@ export default function RoleThematicConfigPage() {
   // Report picker modal
   const [pickerTarget, setPickerTarget] = useState<{ parentId: string | null; name: string } | null>(null);
 
+  // Adaptive role pageSize based on real sidebar container height (no scrollbar + pagination conflict)
+  const roleListStageRef = useRef<HTMLDivElement>(null);
+  const [rolePageSize, setRolePageSize] = useState<number | null>(null);
+  const rolePageSizeRef = useRef<number | null>(null);
+  const rolePageRef = useRef(rolePage);
+  rolePageRef.current = rolePage;
+
+  useLayoutEffect(() => {
+    const el = roleListStageRef.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const applySize = (height: number, immediate: boolean) => {
+      if (height <= 0) return;
+      const next = calcRolePageSize(height);
+      const commit = () => {
+        const prev = rolePageSizeRef.current;
+        if (prev === next) return;
+        rolePageSizeRef.current = next;
+        setRolePageSize(next);
+        if (prev !== null && rolePageRef.current > 1) {
+          const firstIndex = (rolePageRef.current - 1) * prev;
+          setRolePage(Math.floor(firstIndex / next) + 1);
+        }
+      };
+      if (immediate) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        commit();
+      } else {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(commit, 150);
+      }
+    };
+    applySize(el.clientHeight, true);
+    const observer = new ResizeObserver(entries => {
+      const height = entries[0]?.contentRect.height ?? el.clientHeight;
+      applySize(height, rolePageSizeRef.current === null);
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
   const isDirty = useMemo(
     () => detail !== null && serializeDraft(draftNodes) !== savedSignature,
     [detail, draftNodes, savedSignature],
@@ -187,14 +246,15 @@ export default function RoleThematicConfigPage() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [isDirty]);
 
-  // Fetch roles list (15 per page)
+  // Fetch roles list using container-adaptive pageSize
   useEffect(() => {
+    if (rolePageSize === null) return;
     const controller = new AbortController();
     setRolesLoading(true);
     setRolesError(undefined);
     const params = new URLSearchParams({
       page: String(rolePage),
-      pageSize: '15',
+      pageSize: String(rolePageSize),
       ...(roleKeyword ? { q: roleKeyword } : {}),
     });
     request<RoleListPage>(`/role-thematic/roles?${params}`, controller.signal)
@@ -216,7 +276,7 @@ export default function RoleThematicConfigPage() {
         if (!controller.signal.aborted) setRolesLoading(false);
       });
     return () => controller.abort();
-  }, [rolePage, roleKeyword, rolesReloadTick]);
+  }, [rolePage, rolePageSize, roleKeyword, rolesReloadTick]);
 
   // Fetch selected role's thematic mapping detail & available reports
   useEffect(() => {
@@ -741,7 +801,7 @@ export default function RoleThematicConfigPage() {
             </label>
           </div>
 
-          <ScrollArea label="角色列表">
+          <div ref={roleListStageRef} className="role-list-stage" role="region" aria-label="角色列表">
             {rolesLoading ? (
               <RequestState loading />
             ) : rolesError ? (
@@ -789,7 +849,7 @@ export default function RoleThematicConfigPage() {
             ) : (
               <RequestState />
             )}
-          </ScrollArea>
+          </div>
 
           <div className="role-sidebar-foot">
             <Pagination
@@ -797,7 +857,7 @@ export default function RoleThematicConfigPage() {
               disabled={rolesLoading}
               data={{
                 page: rolePage,
-                pageSize: rolesData?.pageSize ?? 15,
+                pageSize: rolesData?.pageSize ?? rolePageSize ?? 15,
                 ...(typeof rolesData?.total === 'number' ? { total: rolesData.total } : {}),
                 hasNext: rolesData?.hasNext ?? false,
               }}
