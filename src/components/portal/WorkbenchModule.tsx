@@ -1,12 +1,11 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { Clock, ChartNoAxesCombined } from 'lucide-react';
+import { Clock, ChartNoAxesCombined, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Report, WorkbenchTab } from '@/lib/portal-model';
 import { typeLabel, themeFor } from '@/lib/portal-model';
 import { FavoriteButton, RequestState, SectionTitle, usePortal } from './PortalProvider';
 import { EntryIcon } from './ReportDetails';
-import ScrollArea from './ScrollArea';
 
 interface ActivePreview {
   report: Report;
@@ -14,6 +13,7 @@ interface ActivePreview {
 }
 
 const VIEWPORT_MARGIN = 16;
+const WORKBENCH_PAGE_SIZE = 8;
 
 function descriptionText(report: Report) {
   return report.description.trim() || '暂未维护模板介绍';
@@ -38,11 +38,15 @@ function computePreviewStyle(element: HTMLElement): CSSProperties & { '--preview
 
 export default function WorkbenchModule() {
   const [tab, setTab] = useState<WorkbenchTab>('recent');
+  const [page, setPage] = useState(1);
   const [preview, setPreview] = useState<ActivePreview | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anchorEl = useRef<HTMLElement | null>(null);
   const { open, bootstrap, workbench: result } = usePortal();
   const reports = result.data?.[tab];
+  const totalPages = reports?.length ? Math.ceil(reports.length / WORKBENCH_PAGE_SIZE) : 1;
+  const currentPage = Math.min(page, totalPages);
+  const visibleReports = reports?.slice((currentPage - 1) * WORKBENCH_PAGE_SIZE, currentPage * WORKBENCH_PAGE_SIZE);
 
   const clearPreview = useCallback(() => {
     if (hoverTimer.current) {
@@ -90,13 +94,20 @@ export default function WorkbenchModule() {
   const activeId = preview?.report.id ?? null;
   const activeTooltipId = activeId ? `workbench-preview-${encodeURIComponent(activeId)}` : undefined;
 
-  return <section className="panel workbench" onScrollCapture={clearPreview}>
+  return <section className="panel workbench">
     <div className="section-heading"><SectionTitle>我的工作台</SectionTitle>
-      <div className="segmented" role="group" aria-label="工作台分类">{([['recent', '最近打开'], ['frequent', '我常用的'], ['favorites', '我收藏的']] as const).map(([key, label]) =>
-        <button key={key} aria-pressed={tab === key} className={tab === key ? 'active' : ''} onClick={() => { clearPreview(); setTab(key); }}>{label}</button>)}</div>
+      <div className="workbench-heading-tools">
+        {totalPages > 1 && <div className="workbench-pager" role="navigation" aria-label="工作台分页">
+          <button type="button" className="icon-button" aria-label="上一页" disabled={currentPage <= 1} onClick={() => { clearPreview(); setPage(Math.max(1, currentPage - 1)); }}><ChevronLeft size={14} /></button>
+          <span>{currentPage} / {totalPages}</span>
+          <button type="button" className="icon-button" aria-label="下一页" disabled={currentPage >= totalPages} onClick={() => { clearPreview(); setPage(Math.min(totalPages, currentPage + 1)); }}><ChevronRight size={14} /></button>
+        </div>}
+        <div className="segmented" role="group" aria-label="工作台分类">{([['recent', '最近打开'], ['frequent', '我常用的'], ['favorites', '我收藏的']] as const).map(([key, label]) =>
+          <button key={key} aria-pressed={tab === key} className={tab === key ? 'active' : ''} onClick={() => { clearPreview(); setTab(key); setPage(1); }}>{label}</button>)}</div>
+      </div>
     </div>
     <p className="section-note">{tab === 'frequent' ? '按近30天访问次数排序' : tab === 'favorites' ? '收藏与帆软平台同步' : '按最近访问日期排序'}{bootstrap.dataAsOf && <span>数据截至 {bootstrap.dataAsOf}</span>}</p>
-    <ScrollArea key={tab} label="工作台报表列表">{reports?.length ? <div className={`workbench-grid${tab === 'favorites' ? '' : ' workbench-top-eight'}`}>{reports.map(report => (
+    <div key={`${tab}:${currentPage}`} className="workbench-stage" role="region" aria-label="工作台报表列表">{visibleReports?.length ? <div className="workbench-grid workbench-top-eight">{visibleReports.map(report => (
       <article
         key={report.id}
         className={`workbench-card tone-${themeFor(report.type)}`}
@@ -117,7 +128,7 @@ export default function WorkbenchModule() {
         </button>
         <div className="card-foot"><span>{tab === 'frequent' ? <ChartNoAxesCombined size={13} /> : <Clock size={13} />}{tab === 'frequent' ? '近30天访问' : '最近访问'}</span><strong>{tab === 'frequent' ? `${report.visits30d} 次` : report.lastVisitedOn || '暂无记录'}</strong></div>
       </article>
-    ))}</div> : <RequestState {...result} />}</ScrollArea>
+    ))}</div> : <RequestState {...result} />}</div>
     {preview && typeof document !== 'undefined' && createPortal(
       <div id={activeTooltipId} role="tooltip" className={`workbench-tooltip-popover${preview.style.bottom ? ' is-above' : ''}`} style={preview.style}>
         <div className="workbench-preview">
