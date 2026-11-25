@@ -113,7 +113,71 @@ export function RequestState({ loading, error, retry }: { loading?: boolean; err
   if (loading) return <div className="request-skeleton" role="status" aria-label="正在加载" aria-busy="true"><Skeleton className="h-10 w-10" /><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-5/6" /></div>;
   return <div className="request-state" role={error ? 'alert' : 'status'}>{error ? <><p>{error}</p><button className="secondary-button" onClick={retry}>重新加载</button></> : <><SearchX size={30} /><p>暂无符合条件的内容</p><span>请调整搜索或筛选条件</span></>}</div>;
 }
-export function Pagination({ data, onChange }: { data: Pick<Page<unknown>, 'total' | 'page' | 'pageSize'>; onChange: (page: number) => void }) {
-  const pages = Math.max(1, Math.ceil(data.total / data.pageSize));
-  return <nav className="pagination" aria-label="分页"><span className="pagination-total">共 {data.total} 项</span><button className="icon-button pagination-btn" aria-label="上一页" disabled={data.page <= 1} onClick={() => onChange(data.page - 1)}><ChevronLeft size={18} strokeWidth={2.4} /></button><span className="pagination-page">{data.page} / {pages}</span><button className="icon-button pagination-btn" aria-label="下一页" disabled={data.page >= pages} onClick={() => onChange(data.page + 1)}><ChevronRight size={18} strokeWidth={2.4} /></button></nav>;
+export function Pagination({
+  data,
+  onChange,
+  disabled = false,
+  compact = false,
+}: {
+  data: { page: number; pageSize: number; total?: number; hasNext?: boolean };
+  onChange: (page: number) => void;
+  disabled?: boolean;
+  compact?: boolean;
+}) {
+  const hasTotal = typeof data.total === 'number' && Number.isFinite(data.total);
+  const pages = hasTotal ? Math.max(1, Math.ceil(data.total! / data.pageSize)) : null;
+  const canPrev = !disabled && data.page > 1;
+  const canNext = !disabled && (pages !== null ? data.page < pages : Boolean(data.hasNext));
+  const [jumpInput, setJumpInput] = useState(String(data.page));
+  useEffect(() => { setJumpInput(String(data.page)); }, [data.page]);
+
+  function submitJump() {
+    if (disabled) return;
+    const parsed = Number.parseInt(jumpInput.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setJumpInput(String(data.page));
+      return;
+    }
+    const target = pages !== null ? Math.min(pages, Math.max(1, parsed)) : Math.max(1, parsed);
+    setJumpInput(String(target));
+    if (target !== data.page) onChange(target);
+  }
+
+  return (
+    <nav className={`pagination${compact ? ' is-compact' : ''}`} aria-label="分页">
+      {hasTotal && !compact && <span className="pagination-total">共 {data.total} 项</span>}
+      <div className="pagination-nav">
+        <button type="button" className="icon-button pagination-btn" aria-label="上一页" disabled={!canPrev} onClick={() => onChange(data.page - 1)}>
+          <ChevronLeft size={18} strokeWidth={2.4} />
+        </button>
+        <span className="pagination-page">{pages !== null ? `${data.page} / ${pages}` : `第 ${data.page} 页`}</span>
+        <button type="button" className="icon-button pagination-btn" aria-label="下一页" disabled={!canNext} onClick={() => onChange(data.page + 1)}>
+          <ChevronRight size={18} strokeWidth={2.4} />
+        </button>
+      </div>
+      <form
+        className="pagination-jump"
+        onSubmit={event => {
+          event.preventDefault();
+          submitJump();
+        }}
+      >
+        <span>跳至</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          className="pagination-jump-input"
+          aria-label="跳转页码"
+          disabled={disabled}
+          value={jumpInput}
+          onChange={event => setJumpInput(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+        />
+        <span>页</span>
+        <button type="submit" className="pagination-jump-btn" disabled={disabled}>
+          跳转
+        </button>
+      </form>
+    </nav>
+  );
 }

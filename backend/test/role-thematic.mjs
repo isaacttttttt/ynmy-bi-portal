@@ -149,10 +149,10 @@ function directAuthRowsForRole(roleId) {
 }
 
 const portalCatalogRows = [
-  { report_id: 'rep-bi-1', report_name: '库存总览', report_type: 'bi' },
-  { report_id: 'rep-cpt-1', report_name: '仓储成本明细', report_type: 'cpt' },
-  { report_id: 'rep-unauth', report_name: '未授权报表', report_type: 'cpt' },
-  { report_id: 'rep-frm-1', report_name: '经营填报', report_type: 'frm' },
+  { report_id: 'rep-bi-1', report_name: '库存总览', report_type: 'bi', report_description: '监控各仓库存周转与安全库存预警' },
+  { report_id: 'rep-cpt-1', report_name: '仓储成本明细', report_type: 'cpt', report_description: '按月拆分仓储费用明细' },
+  { report_id: 'rep-unauth', report_name: '未授权报表', report_type: 'cpt', report_description: '' },
+  { report_id: 'rep-frm-1', report_name: '经营填报', report_type: 'frm', report_description: '业务单元月度目标填报' },
 ];
 
 let lastObjectTreeSql = '';
@@ -312,6 +312,8 @@ assert.deepEqual(
   role1Reports.map(r => [r.reportId, r.reportType]).sort(),
   [['rep-bi-1', 'bi'], ['rep-cpt-1', 'cpt'], ['rep-unauth', 'cpt']],
 );
+assert.equal(role1Reports.find(r => r.reportId === 'rep-bi-1')?.description, '监控各仓库存周转与安全库存预警');
+assert.equal(role1Reports.find(r => r.reportId === 'rep-unauth')?.description, '');
 assert(!lastObjectTreeSql.includes('WITH RECURSIVE'), 'Object tree load must not run recursive CTE in PG');
 assert(!lastObjectTreeSql.includes('dim_bi_report_info_dtl'), 'FineDB query must not cross-join portal tables');
 assert(lastObjectTreeSql.includes('finedb.fine_authority_object'));

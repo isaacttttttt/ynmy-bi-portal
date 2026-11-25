@@ -234,12 +234,27 @@ legend { margin-bottom:10px; font-size:14px; font-weight:600; color:#617fa6; }
 .dictionary-list .dictionary-actions { width:90px; flex-direction:column; justify-content:center; gap:4px; padding:0; }
 .dictionary-list .metadata-row { margin:10px 0; }
 .dictionary-list .source-row { border:0; padding:0; }
-.pagination { display:flex; justify-content:flex-end; align-items:center; gap:12px; margin-top:16px; font-size:15px; font-weight:600; color:#13263d; font-variant-numeric:tabular-nums; }
+.pagination { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:10px 12px; margin-top:16px; font-size:15px; font-weight:600; color:#13263d; font-variant-numeric:tabular-nums; }
 .pagination-total { color:#13263d; }
-.pagination-page { padding:4px 12px; border-radius:8px; background:#e8f1ff; border:1px solid #b5d2ff; color:#1559d1; font-weight:700; line-height:1.35; }
+.pagination-nav { display:inline-flex; align-items:center; gap:10px; }
+.pagination-page { padding:4px 12px; border-radius:8px; background:#e8f1ff; border:1px solid #b5d2ff; color:#1559d1; font-weight:700; line-height:1.35; white-space:nowrap; }
 .pagination-btn { width:34px; height:34px; border-radius:8px; background:#1a66eb; color:#ffffff; border:1px solid #1a66eb; box-shadow:0 2px 6px #1a66eb2b; transition:background-color .15s,border-color .15s; }
 .pagination-btn:hover:enabled { background:#1251c4; border-color:#1251c4; }
 .pagination-btn:disabled { background:#eef3fa; border-color:#d4e1f0; color:#8ba0bc; box-shadow:none; opacity:1; }
+.pagination-jump { display:inline-flex; align-items:center; gap:6px; font-size:14px; font-weight:500; color:#2b4363; }
+.pagination-jump-input { width:52px; height:34px; padding:0 8px; border-radius:8px; border:1px solid #b8d2f4; background:#ffffff; color:#13263d; font-size:14px; font-weight:600; text-align:center; outline:none; transition:border-color .15s,box-shadow .15s; }
+.pagination-jump-input:focus { border-color:#1a66eb; box-shadow:0 0 0 2px #1a66eb26; }
+.pagination-jump-input:disabled { background:#f2f6fb; color:#8ba0bc; }
+.pagination-jump-btn { height:34px; padding:0 12px; border-radius:8px; border:1px solid #1a66eb; background:#edf4ff; color:#1559d1; font-size:14px; font-weight:600; white-space:nowrap; transition:background-color .15s,color .15s; }
+.pagination-jump-btn:hover:enabled { background:#1a66eb; color:#ffffff; }
+.pagination-jump-btn:disabled { background:#eef3fa; border-color:#d4e1f0; color:#8ba0bc; opacity:1; }
+.pagination.is-compact { justify-content:center; gap:8px 10px; margin-top:0; font-size:13px; }
+.pagination.is-compact .pagination-nav { gap:8px; }
+.pagination.is-compact .pagination-page { padding:3px 10px; font-size:13px; }
+.pagination.is-compact .pagination-btn { width:30px; height:30px; }
+.pagination.is-compact .pagination-jump { font-size:13px; gap:5px; }
+.pagination.is-compact .pagination-jump-input { width:46px; height:30px; font-size:13px; }
+.pagination.is-compact .pagination-jump-btn { height:30px; padding:0 10px; font-size:13px; }
 .view-toggle { height:clamp(44px,5dvh,56px); align-items:center; background:#f1f7ff; border:1px solid white; padding:2px 6px; flex-shrink:0; }
 .view-toggle button { display:flex; align-items:center; justify-content:center; width:clamp(42px,3vw,54px); height:calc(100% - 4px); padding:0; }
 .view-toggle button.active { background:#dceaff; color:var(--portal-blue); }
@@ -381,11 +396,7 @@ legend { margin-bottom:10px; font-size:14px; font-weight:600; color:#617fa6; }
 .role-list-item.is-active .role-list-badge { background:var(--portal-blue); border-color:var(--portal-blue); color:#fff; }
 
 .role-sidebar-foot { flex-shrink:0; padding-top:12px; margin-top:8px; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
-.role-pager { display:flex; align-items:center; justify-content:space-between; gap:6px; }
-.role-pager-btn { display:inline-flex; align-items:center; gap:2px; padding:4px 10px; border-radius:8px; border:1px solid #d5e4f7; background:#fff; color:#355d8c; font-size:12px; }
-.role-pager-btn:hover:enabled { border-color:var(--portal-blue); color:var(--portal-blue); background:#f1f7ff; }
-.role-pager-info { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
-.role-sidebar-hint { margin:0; font-size:12px; color:#7c94b3; }
+.role-sidebar-hint { margin:0; font-size:12px; color:#7c94b3; text-align:center; }
 
 .role-editor { display:flex; flex-direction:column; padding:18px 22px 14px; min-height:0; overflow:hidden; }
 .role-editor-empty,.role-editor-loading { flex:1; display:flex; align-items:center; justify-content:center; }
@@ -507,7 +518,7 @@ legend { margin-bottom:10px; font-size:14px; font-weight:600; color:#617fa6; }
 .role-picker-item input { accent-color:var(--portal-blue); width:15px; height:15px; }
 .role-picker-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
 .role-picker-copy strong { font-size:14px; font-weight:500; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.role-picker-copy small { font-size:11px; color:#869cb8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.role-picker-copy small { font-size:12px; color:#6d84a4; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .role-added-tag { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#389e0d; background:#f6ffed; border:1px solid #b7eb8f; padding:2px 8px; border-radius:6px; white-space:nowrap; }
 .role-picker-empty { padding:48px 24px; text-align:center; color:var(--muted); font-size:13px; }
 .role-picker-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }

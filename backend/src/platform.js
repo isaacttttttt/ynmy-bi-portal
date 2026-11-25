@@ -222,10 +222,16 @@ export function platformClient(env = process.env, fineDb) {
         return { id: row.id, name: row.text, description: typeof row.description === 'string' ? row.description : '' };
       });
       rememberRoles(token, items);
+      const total = Number.isInteger(data.total) && data.total >= 0
+        ? data.total
+        : Number.isInteger(data.totalCount) && data.totalCount >= 0
+          ? data.totalCount
+          : undefined;
       return {
         page: Number.isInteger(data.page) && data.page > 0 ? data.page : page,
         pageSize: count,
         hasNext: Boolean(data.hasNext),
+        ...(total !== undefined ? { total } : {}),
         items,
       };
     }, {

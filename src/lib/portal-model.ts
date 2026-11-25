@@ -38,12 +38,14 @@ export interface RoleListPage {
   page: number;
   pageSize: number;
   hasNext: boolean;
+  total?: number;
 }
 export interface RoleAvailableReport {
   reportId: string;
   reportName: string;
   reportType: Exclude<EntryType, 'folder'>;
   catalogName: string;
+  description?: string;
 }
 export interface RoleThematicNode {
   id: string;

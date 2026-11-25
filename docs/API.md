@@ -121,7 +121,7 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 }
 ```
 
-详情以右侧抽屉展示，依次为报表说明（useScene）、报表简介（description）、核心指标、数据来源（source、calcLogic）、管理信息。`onlineOn` 来自 `online_date`，`updateNote` 来自 `last_update_note`；`developerDepartment` 来自 `dev_owner_dept`。缺失值显示“暂未维护”，不以最近更新日期冒充上线时间。
+详情以右侧抽屉展示，依次为业务场景（useScene）、报表简介（description）、核心指标、数据来源（source、calcLogic）、管理信息。`onlineOn` 来自 `online_date`，`updateNote` 来自 `last_update_note`；`developerDepartment` 来自 `dev_owner_dept`。缺失值显示“暂未维护”，不以最近更新日期冒充上线时间。
 
 归档报表可以查元数据，字典禁用打开按钮；后端将其排除在工作台之外并拒绝新增收藏。平台专题来自 tree，元数据归档不会自动撤销平台权限；正式停用报表时须同时下架平台入口或撤销权限，防止从其他入口打开。没有正式口径的字段返回空字符串，不自动生成业务口径。
 

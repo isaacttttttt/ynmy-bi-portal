@@ -316,6 +316,9 @@ export function buildAuthorityObjectIndex(rows, catalogRows = []) {
     const catalog = catalogById.get(id);
     const catalogName = typeof (catalog?.report_name ?? row.catalog_name) === 'string' ? (catalog?.report_name ?? row.catalog_name).trim() : '';
     const fallbackType = catalog?.report_type ?? row.report_type ?? null;
+    const description = typeof (catalog?.report_description ?? row.report_description) === 'string'
+      ? (catalog?.report_description ?? row.report_description).trim()
+      : '';
     const node = {
       id,
       parentId,
@@ -323,6 +326,7 @@ export function buildAuthorityObjectIndex(rows, catalogRows = []) {
       reportName: displayName || catalogName || id,
       catalogName: catalogName || displayName || id,
       reportType: inferReportTypeFromAuthorityObject(expandType, row.object_path, fallbackType),
+      description,
     };
     byId.set(id, node);
     if (parentId) {
@@ -362,6 +366,7 @@ export function resolveAllowedReportsFromTree(tree, directAuthRows) {
         reportName: node.reportName,
         reportType: node.reportType,
         catalogName: node.catalogName,
+        description: node.description || '',
       });
     }
     if (depth >= 32) continue;
@@ -381,15 +386,36 @@ async function loadCatalogMetadataForTree(db, log) {
   try {
     const { rows } = await db.query(
       `/* portal: catalog metadata for authority tree */
-       SELECT report_id, report_name, report_type
-       FROM dim_bi_report_info_dtl
-       WHERE report_id IS NOT NULL`,
+       SELECT coalesce(r.report_id, d.report_id) AS report_id,
+              coalesce(nullif(trim(d.report_name), ''), r.report_name) AS report_name,
+              r.report_type,
+              d.report_description
+       FROM dim_bi_report_info_dtl r
+       FULL OUTER JOIN (
+         SELECT DISTINCT ON (report_id) report_id, report_name, report_description
+         FROM dim_bi_report_dictionary
+         WHERE report_id IS NOT NULL AND trim(report_id) <> ''
+         ORDER BY report_id, id
+       ) d USING (report_id)
+       WHERE coalesce(r.report_id, d.report_id) IS NOT NULL`,
     );
     return rows;
   } catch (error) {
     if (!['42P01', '42703'].includes(error.code)) throw error;
-    log?.warn({ stage: 'finedb-object-tree-cache', code: error.code, reason: error.message }, 'dim_bi_report_info_dtl unavailable for authority tree');
-    return [];
+    log?.warn({ stage: 'finedb-object-tree-cache', code: error.code, reason: error.message }, 'dim_bi_report_dictionary unavailable for authority tree, falling back to dim_bi_report_info_dtl');
+    try {
+      const { rows } = await db.query(
+        `/* portal: catalog metadata for authority tree */
+         SELECT report_id, report_name, report_type
+         FROM dim_bi_report_info_dtl
+         WHERE report_id IS NOT NULL`,
+      );
+      return rows;
+    } catch (fallbackError) {
+      if (!['42P01', '42703'].includes(fallbackError.code)) throw fallbackError;
+      log?.warn({ stage: 'finedb-object-tree-cache', code: fallbackError.code, reason: fallbackError.message }, 'dim_bi_report_info_dtl unavailable for authority tree');
+      return [];
+    }
   }
 }
 

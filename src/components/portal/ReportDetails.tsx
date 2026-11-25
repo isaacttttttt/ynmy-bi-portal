@@ -38,7 +38,7 @@ export function ReportDetails({ report, onClose }: { report: Report | null; onCl
   const shown = report || previous; // Keep content visible throughout the closing animation.
   const text = (value: string | null) => value || '暂未维护';
   return <Drawer open={!!report} onClose={onClose} placement="right" width="min(680px, 100vw)" rootClassName="report-drawer" title={shown && <><h2>{shown.name}</h2><p>{[shown.department, shown.owner, shown.frequency].filter(Boolean).join(' · ')}</p></>} footer={shown && <div className="detail-footer"><FavoriteButton entry={shown} /><button className="secondary-button" onClick={onClose}>关闭</button><button className="primary-button" disabled={shown.permission === 'denied' || shown.status === 'archived'} onClick={() => { onClose(); open(shown); }}>{shown.permission === 'denied' ? '无访问权限' : shown.status === 'archived' ? '已归档，暂停打开' : '打开报表'}</button></div>}>
-    {shown && <ScrollArea label="报表详情"><section><h3>报表说明</h3><p>{text(shown.useScene)}</p></section>
+    {shown && <ScrollArea label="报表详情"><section><h3>业务场景</h3><p>{text(shown.useScene)}</p></section>
       <section><h3>报表简介</h3><p>{text(shown.description)}</p></section>
       <section><h3>核心指标</h3>{shown.metrics.length ? <div className="metric-tags">{shown.metrics.map(m => <span key={m}>{m}</span>)}</div> : <p>暂未维护</p>}</section>
       <section><h3>数据来源</h3><dl><div><dt>数据源系统</dt><dd>{text(shown.source)}</dd></div><div><dt>计算逻辑</dt><dd className="calculation">{text(shown.calcLogic)}</dd></div></dl></section>

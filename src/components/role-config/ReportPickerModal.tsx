@@ -45,6 +45,7 @@ export default function ReportPickerModal({
     return availableReports.filter(
       item =>
         item.reportName.toLocaleLowerCase().includes(q) ||
+        (item.description || '').toLocaleLowerCase().includes(q) ||
         item.reportId.toLocaleLowerCase().includes(q) ||
         typeLabel[item.reportType].toLocaleLowerCase().includes(q),
     );
@@ -126,7 +127,7 @@ export default function ReportPickerModal({
             type="text"
             value={keyword}
             onChange={e => setKeyword(e.target.value)}
-            placeholder="搜索报表名称、ID 或类型…"
+            placeholder="搜索报表名称、报表介绍或类型…"
             aria-label="搜索可配置报表"
           />
         </label>
@@ -146,6 +147,7 @@ export default function ReportPickerModal({
               {filtered.map(report => {
                 const alreadyAdded = existingReportIds.has(report.reportId);
                 const checked = selectedIds.has(report.reportId);
+                const description = report.description?.trim() || '暂未维护报表介绍';
                 return (
                   <label
                     key={report.reportId}
@@ -162,7 +164,7 @@ export default function ReportPickerModal({
                     </span>
                     <span className="role-picker-copy">
                       <strong>{report.reportName}</strong>
-                      <small>{report.reportId}</small>
+                      <small title={description}>{description}</small>
                     </span>
                     <span className={`role-type-pill tone-${themeFor(report.reportType)}`}>
                       {typeLabel[report.reportType]}

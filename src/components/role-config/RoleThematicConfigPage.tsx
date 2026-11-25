@@ -8,7 +8,6 @@ import {
   ArrowUp,
   BarChart2,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
   ClipboardEdit,
@@ -43,7 +42,7 @@ import {
   type RoleThematicDetail,
   type RoleThematicNode,
 } from '@/lib/portal-model';
-import { RequestState, SectionTitle } from '@/components/portal/PortalProvider';
+import { Pagination, RequestState, SectionTitle } from '@/components/portal/PortalProvider';
 import ScrollArea from '@/components/portal/ScrollArea';
 import ReportPickerModal from './ReportPickerModal';
 
@@ -710,10 +709,9 @@ export default function RoleThematicConfigPage() {
           <img src="/portal/assets/company_title.png" alt="云南白药" className="role-config-logo" />
           <div className="role-config-title-group">
             <h1>专题分析 · 目录配置</h1>
-            <p>为有管理权限的角色定制门户首页专题目录结构、报表归属与排序</p>
+            <p>为角色定制门户首页专题分析板块的目录结构、报表归属与排序</p>
           </div>
         </div>
-        <span className="environment-label">独立权限配置</span>
       </header>
 
       <main className="role-config-workspace">
@@ -777,33 +775,34 @@ export default function RoleThematicConfigPage() {
                   );
                 })}
               </ul>
+            ) : rolePage > 1 ? (
+              <div className="request-state" role="status">
+                <p>第 {rolePage} 页暂无更多角色</p>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => confirmDiscardIfDirty(() => setRolePage(1))}
+                >
+                  返回第 1 页
+                </button>
+              </div>
             ) : (
               <RequestState />
             )}
           </ScrollArea>
 
           <div className="role-sidebar-foot">
-            <div className="role-pager">
-              <button
-                type="button"
-                className="role-pager-btn"
-                disabled={rolesLoading || rolePage <= 1}
-                onClick={() => confirmDiscardIfDirty(() => setRolePage(p => Math.max(1, p - 1)))}
-              >
-                <ChevronLeft size={14} />
-                上一页
-              </button>
-              <span className="role-pager-info">第 {rolePage} 页</span>
-              <button
-                type="button"
-                className="role-pager-btn"
-                disabled={rolesLoading || !rolesData?.hasNext}
-                onClick={() => confirmDiscardIfDirty(() => setRolePage(p => p + 1))}
-              >
-                下一页
-                <ChevronRight size={14} />
-              </button>
-            </div>
+            <Pagination
+              compact
+              disabled={rolesLoading}
+              data={{
+                page: rolePage,
+                pageSize: rolesData?.pageSize ?? 15,
+                ...(typeof rolesData?.total === 'number' ? { total: rolesData.total } : {}),
+                hasNext: rolesData?.hasNext ?? false,
+              }}
+              onChange={nextPage => confirmDiscardIfDirty(() => setRolePage(nextPage))}
+            />
             <p className="role-sidebar-hint">选择角色，查看并调整专题目录与访问权限</p>
           </div>
         </aside>
