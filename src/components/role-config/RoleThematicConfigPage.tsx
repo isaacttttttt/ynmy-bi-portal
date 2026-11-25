@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { Modal, Tooltip, message } from 'antd';
 import {
   AlertTriangle,
@@ -43,6 +43,8 @@ import {
   type RoleThematicNode,
 } from '@/lib/portal-model';
 import { Pagination, RequestState, SectionTitle } from '@/components/portal/PortalProvider';
+import { createSearchHighlighter } from '@/components/portal/highlight-search-text';
+import { useAdaptivePageSize } from '@/components/portal/use-adaptive-page-size';
 import ScrollArea from '@/components/portal/ScrollArea';
 import ReportPickerModal from './ReportPickerModal';
 
@@ -56,17 +58,7 @@ interface FlatTreeRow {
   siblingCount: number;
 }
 
-const ROLE_ROW_HEIGHT = 42;
-const ROLE_ROW_GAP = 4;
-const ROLE_LIST_TOP_PAD = 10;
-const ROLE_PAGE_SIZE_MIN = 5;
-const ROLE_PAGE_SIZE_MAX = 50;
-
-function calcRolePageSize(containerHeight: number) {
-  const usable = Math.max(0, containerHeight - ROLE_LIST_TOP_PAD);
-  const fit = Math.floor((usable + ROLE_ROW_GAP) / (ROLE_ROW_HEIGHT + ROLE_ROW_GAP));
-  return Math.max(ROLE_PAGE_SIZE_MIN, Math.min(ROLE_PAGE_SIZE_MAX, fit));
-}
+const ROLE_LIST_LAYOUT = { rowHeight: 42, rowGap: 4, reservedHeight: 10, min: 5, max: 50, debounceMs: 400 } as const;
 
 function createNodeId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -175,51 +167,11 @@ export default function RoleThematicConfigPage() {
   const [pickerTarget, setPickerTarget] = useState<{ parentId: string | null; name: string } | null>(null);
 
   // Adaptive role pageSize based on real sidebar container height (no scrollbar + pagination conflict)
-  const roleListStageRef = useRef<HTMLDivElement>(null);
-  const [rolePageSize, setRolePageSize] = useState<number | null>(null);
-  const rolePageSizeRef = useRef<number | null>(null);
-  const rolePageRef = useRef(rolePage);
-  rolePageRef.current = rolePage;
-
-  useLayoutEffect(() => {
-    const el = roleListStageRef.current;
-    if (!el) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const applySize = (height: number, immediate: boolean) => {
-      if (height <= 0) return;
-      const next = calcRolePageSize(height);
-      const commit = () => {
-        const prev = rolePageSizeRef.current;
-        if (prev === next) return;
-        rolePageSizeRef.current = next;
-        setRolePageSize(next);
-        if (prev !== null && rolePageRef.current > 1) {
-          const firstIndex = (rolePageRef.current - 1) * prev;
-          setRolePage(Math.floor(firstIndex / next) + 1);
-        }
-      };
-      if (immediate) {
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-        commit();
-      } else {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(commit, 150);
-      }
-    };
-    applySize(el.clientHeight, true);
-    const observer = new ResizeObserver(entries => {
-      const height = entries[0]?.contentRect.height ?? el.clientHeight;
-      applySize(height, rolePageSizeRef.current === null);
-    });
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
+  const { containerRef: roleListStageRef, pageSize: rolePageSize } = useAdaptivePageSize({
+    ...ROLE_LIST_LAYOUT,
+    page: rolePage,
+    onPageAdjust: setRolePage,
+  });
 
   const isDirty = useMemo(
     () => detail !== null && serializeDraft(draftNodes) !== savedSignature,
@@ -228,12 +180,14 @@ export default function RoleThematicConfigPage() {
 
   // Debounce role search keyword
   useEffect(() => {
+    const trimmed = roleKeywordInput.trim();
+    if (trimmed === roleKeyword) return;
     const timer = setTimeout(() => {
-      setRoleKeyword(roleKeywordInput.trim());
+      setRoleKeyword(trimmed);
       setRolePage(1);
     }, 250);
     return () => clearTimeout(timer);
-  }, [roleKeywordInput]);
+  }, [roleKeywordInput, roleKeyword]);
 
   // Warn before closing tab with unsaved changes
   useEffect(() => {
@@ -758,6 +712,8 @@ export default function RoleThematicConfigPage() {
 
   const savedTimeLabel = formatSavedTime(detail?.role.updatedAt ?? null);
   const draggingNode = draggingId ? draftNodes.find(n => n.id === draggingId) : null;
+  const highlightRole = useMemo(() => createSearchHighlighter(roleKeywordInput), [roleKeywordInput]);
+  const highlightTree = useMemo(() => createSearchHighlighter(treeQuery), [treeQuery]);
 
   return (
     <div className="role-config-page">
@@ -801,13 +757,13 @@ export default function RoleThematicConfigPage() {
             </label>
           </div>
 
-          <div ref={roleListStageRef} className="role-list-stage" role="region" aria-label="角色列表">
-            {rolesLoading ? (
+          <div ref={roleListStageRef} className="role-list-stage" role="region" aria-label="角色列表" aria-busy={rolesLoading}>
+            {rolesLoading && !rolesData ? (
               <RequestState loading />
             ) : rolesError ? (
               <RequestState error={rolesError} retry={() => setRolesReloadTick(n => n + 1)} />
             ) : rolesData?.items.length ? (
-              <ul className="role-list" role="listbox" aria-label="可配置角色">
+              <ul className={`role-list${rolesLoading ? ' is-loading' : ''}`} role="listbox" aria-label="可配置角色">
                 {rolesData.items.map(role => {
                   const active = selectedRole?.id === role.id;
                   return (
@@ -824,7 +780,7 @@ export default function RoleThematicConfigPage() {
                         }}
                       >
                         <UserCog size={16} className="role-list-icon" aria-hidden="true" />
-                        <span className="role-list-name">{role.name}</span>
+                        <span className="role-list-name">{highlightRole(role.name)}</span>
                         {role.configured && (
                           <span className="role-list-badge" title="已开放 / 已配置报表数">
                             {role.enabledReportCount ?? 0}/{role.totalReportCount ?? 0}
@@ -1119,7 +1075,7 @@ export default function RoleThematicConfigPage() {
                                     />
                                   ) : (
                                     <span className={`role-node-title${isFolder ? ' is-folder' : ''}`}>
-                                      {node.name}
+                                      {highlightTree(node.name)}
                                     </span>
                                   )}
 

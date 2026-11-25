@@ -139,50 +139,25 @@ export async function userDeptJobIds(fineDb, context, { env = process.env } = {}
   const schema = fineDbSchema(env);
   const { rows } = await fineDb.query(
     `/* portal: finedb user departments */
-     SELECT DISTINCT dep_id
-     FROM (
-       SELECT trim(dr.departmentid::text) AS dep_id
-       FROM ${schema}.fine_user_role_middle urm
-       JOIN ${schema}.fine_user fu ON fu.id = urm.userid
-       JOIN ${schema}.fine_dep_role dr ON dr.id = urm.roleid
-       WHERE fu.username = $1
-         AND fu.enable::text IN ('true', 't')
-         AND ($2::text[] IS NULL OR fu.id::text = ANY($2::text[]))
-         AND urm.roletype = 1
-         AND dr.departmentid IS NOT NULL
-         AND trim(dr.departmentid::text) <> ''
-       UNION
-       SELECT trim(urm.roleid::text) AS dep_id
-       FROM ${schema}.fine_user_role_middle urm
-       JOIN ${schema}.fine_user fu ON fu.id = urm.userid
-       WHERE fu.username = $1
-         AND fu.enable::text IN ('true', 't')
-         AND ($2::text[] IS NULL OR fu.id::text = ANY($2::text[]))
-         AND urm.roletype = 1
-         AND urm.roleid IS NOT NULL
-         AND trim(urm.roleid::text) <> ''
-     ) t`,
+     SELECT DISTINCT trim(dr.departmentid::text) AS dep_id
+     FROM ${schema}.fine_user_role_middle urm
+     JOIN ${schema}.fine_user fu ON fu.id = urm.userid
+     JOIN ${schema}.fine_dep_role dr ON dr.id = urm.roleid
+     WHERE fu.username = $1
+       AND fu.enable::text IN ('true', 't')
+       AND ($2::text[] IS NULL OR fu.id::text = ANY($2::text[]))
+       AND urm.roletype = 1
+       AND dr.departmentid IS NOT NULL
+       AND trim(dr.departmentid::text) <> ''`,
     [context.user.userName, context.user.fineUserIds ?? null],
   );
   return rows.map(row => row.dep_id).filter(Boolean);
 }
 
 export async function noticesFor(db, context, { fineDb = null, env = process.env } = {}) {
-  let deptJobIds = null;
-  if (Array.isArray(context.user?.oaDeptCodes)) {
-    deptJobIds = context.user.oaDeptCodes;
-  } else if (fineDb) {
-    try {
-      deptJobIds = await userDeptJobIds(fineDb, context, { env });
-    } catch (error) {
-      if (!['42P01', '42703', '3F000', '42501'].includes(error.code)) throw error;
-      context.log?.warn({ stage: 'notice-departments', code: error.code, reason: error.message }, 'finedb user departments unavailable, falling back to dim_bi_user');
-    }
-  }
-
   let rows;
-  if (Array.isArray(deptJobIds)) {
-    if (!deptJobIds.length) return [];
+  if (Array.isArray(context.user?.oaDeptCodes)) {
+    if (!context.user.oaDeptCodes.length) return [];
     ({ rows } = await db.query(
       `SELECT n.* FROM (SELECT DISTINCT n.* FROM fr_index_noticement n
         INNER JOIN (
@@ -196,25 +171,57 @@ export async function noticesFor(db, context, { fineDb = null, env = process.env
         ) n
         ORDER BY CASE WHEN n.notice_is_top IN ('1','是') THEN 1 ELSE 0 END DESC,
           n.notice_register_day_id DESC, n.notice_uuid`,
-      [deptJobIds, businessDate()],
+      [context.user.oaDeptCodes, businessDate()],
     ));
   } else {
-    ({ rows } = await db.query(
-      `SELECT n.* FROM (SELECT DISTINCT n.* FROM fr_index_noticement n
-        INNER JOIN (
-          SELECT DISTINCT trim(m.dept_name) AS dept_name
-          FROM dim_bi_user u INNER JOIN dim_dept_mapping m ON trim(u.oa_dept_code)=trim(m.dept_job_id)
-          WHERE u.username=$1 AND u.enable='true'
-            AND ($3::text[] IS NULL OR u.id::text=ANY($3::text[]))
-        ) departments ON departments.dept_name IN
-          (SELECT trim(value) FROM unnest(string_to_array(n.notice_dept_name,',')) AS value)
-        WHERE nullif(trim(n.notice_start_day_id),'')::date <= $2::date
-          AND (nullif(trim(n.notice_last_day_id),'') IS NULL OR n.notice_last_day_id::date >= $2::date)
-        ) n
-        ORDER BY CASE WHEN n.notice_is_top IN ('1','是') THEN 1 ELSE 0 END DESC,
-          n.notice_register_day_id DESC, n.notice_uuid`,
-      [context.user.userName, businessDate(), context.user.fineUserIds ?? null],
-    ));
+    let fineDeptIds = [];
+    if (fineDb) {
+      try {
+        fineDeptIds = await userDeptJobIds(fineDb, context, { env });
+      } catch (error) {
+        if (!['42P01', '42703', '3F000', '42501'].includes(error.code)) throw error;
+        context.log?.warn({ stage: 'notice-departments', code: error.code, reason: error.message }, 'finedb user departments unavailable, falling back to dim_bi_user');
+      }
+    }
+    if (fineDeptIds.length) {
+      ({ rows } = await db.query(
+        `SELECT n.* FROM (SELECT DISTINCT n.* FROM fr_index_noticement n
+          INNER JOIN (
+            SELECT trim(m.dept_name) AS dept_name
+            FROM dim_dept_mapping m
+            WHERE trim(m.dept_job_id) = ANY($4::text[])
+            UNION
+            SELECT trim(m.dept_name) AS dept_name
+            FROM dim_bi_user u INNER JOIN dim_dept_mapping m ON trim(u.oa_dept_code)=trim(m.dept_job_id)
+            WHERE u.username=$1 AND u.enable='true'
+              AND ($3::text[] IS NULL OR u.id::text=ANY($3::text[]))
+          ) departments ON departments.dept_name IN
+            (SELECT trim(value) FROM unnest(string_to_array(n.notice_dept_name,',')) AS value)
+          WHERE nullif(trim(n.notice_start_day_id),'')::date <= $2::date
+            AND (nullif(trim(n.notice_last_day_id),'') IS NULL OR n.notice_last_day_id::date >= $2::date)
+          ) n
+          ORDER BY CASE WHEN n.notice_is_top IN ('1','是') THEN 1 ELSE 0 END DESC,
+            n.notice_register_day_id DESC, n.notice_uuid`,
+        [context.user.userName, businessDate(), context.user.fineUserIds ?? null, fineDeptIds],
+      ));
+    } else {
+      ({ rows } = await db.query(
+        `SELECT n.* FROM (SELECT DISTINCT n.* FROM fr_index_noticement n
+          INNER JOIN (
+            SELECT DISTINCT trim(m.dept_name) AS dept_name
+            FROM dim_bi_user u INNER JOIN dim_dept_mapping m ON trim(u.oa_dept_code)=trim(m.dept_job_id)
+            WHERE u.username=$1 AND u.enable='true'
+              AND ($3::text[] IS NULL OR u.id::text=ANY($3::text[]))
+          ) departments ON departments.dept_name IN
+            (SELECT trim(value) FROM unnest(string_to_array(n.notice_dept_name,',')) AS value)
+          WHERE nullif(trim(n.notice_start_day_id),'')::date <= $2::date
+            AND (nullif(trim(n.notice_last_day_id),'') IS NULL OR n.notice_last_day_id::date >= $2::date)
+          ) n
+          ORDER BY CASE WHEN n.notice_is_top IN ('1','是') THEN 1 ELSE 0 END DESC,
+            n.notice_register_day_id DESC, n.notice_uuid`,
+        [context.user.userName, businessDate(), context.user.fineUserIds ?? null],
+      ));
+    }
   }
   return rows.map(row => ({
     id: row.notice_uuid, title: row.notice_title || '', category: row.notice_category || '',

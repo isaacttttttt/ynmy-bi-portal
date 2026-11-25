@@ -171,6 +171,7 @@ export function Pagination({
           aria-label="跳转页码"
           disabled={disabled}
           value={jumpInput}
+          onFocus={event => event.currentTarget.select()}
           onChange={event => setJumpInput(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
         />
         <span>页</span>

@@ -1,24 +1,12 @@
 "use client";
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Modal } from 'antd';
 import type { Notice, Page } from '@/lib/portal-model';
 import { Pagination, RequestState, SectionTitle, usePortalRequest } from './PortalProvider';
+import { useAdaptivePageSize } from './use-adaptive-page-size';
 import NoticeModal from './NoticeModal';
 
-const MODAL_NOTICE_ROW_HEIGHT = 52;
-const MODAL_NOTICE_MIN = 4;
-const MODAL_NOTICE_MAX = 15;
-
-function calcModalNoticePageSize(height: number) {
-  const fit = Math.floor(Math.max(0, height) / MODAL_NOTICE_ROW_HEIGHT);
-  return Math.max(MODAL_NOTICE_MIN, Math.min(MODAL_NOTICE_MAX, fit));
-}
-
-function initialModalNoticePageSize() {
-  if (typeof window === 'undefined') return 8;
-  const stageHeight = Math.min(520, window.innerHeight * 0.6) - 52;
-  return calcModalNoticePageSize(stageHeight);
-}
+const MODAL_NOTICE_LAYOUT = { rowHeight: 52, reservedHeight: 48, min: 4, max: 15, debounceMs: 400 } as const;
 
 export default function NoticeModule() {
   const [all, setAll] = useState(false);
@@ -55,55 +43,41 @@ function NoticeList({ notices, onSelect }: { notices: Notice[]; onSelect: (notic
 }
 
 function AllNotices({ onSelect }: { onSelect: (notice: Notice) => void }) {
-  const stageRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(initialModalNoticePageSize);
-  const pageRef = useRef(page);
-  const sizeRef = useRef(pageSize);
-  pageRef.current = page;
-  sizeRef.current = pageSize;
+  const { containerRef, pageSize } = useAdaptivePageSize({
+    ...MODAL_NOTICE_LAYOUT,
+    page,
+    onPageAdjust: setPage,
+  });
 
-  useLayoutEffect(() => {
-    const el = stageRef.current;
-    if (!el) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const apply = (height: number, immediate: boolean) => {
-      if (height <= 0) return;
-      const next = calcModalNoticePageSize(height);
-      const commit = () => {
-        const prev = sizeRef.current;
-        if (prev === next) return;
-        sizeRef.current = next;
-        setPageSize(next);
-        if (pageRef.current > 1) {
-          const firstIndex = (pageRef.current - 1) * prev;
-          setPage(Math.floor(firstIndex / next) + 1);
-        }
-      };
-      if (immediate) {
-        if (timer) { clearTimeout(timer); timer = null; }
-        commit();
-      } else {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(commit, 150);
-      }
-    };
-    apply(el.clientHeight, true);
-    const observer = new ResizeObserver(entries => {
-      apply(entries[0]?.contentRect.height ?? el.clientHeight, false);
-    });
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-
-  const result = usePortalRequest<Page<Notice>>(`/notices?page=${page}&pageSize=${pageSize}`);
-  return <div className="all-notices-body">
-    <div ref={stageRef} className="all-notices-stage" role="region" aria-label="全部公告列表">
-      {result.data?.items.length ? <NoticeList notices={result.data.items} onSelect={onSelect} /> : <RequestState {...result} />}
-    </div>
-    {result.data && <Pagination data={result.data} onChange={setPage} />}
+  return <div ref={containerRef} className="all-notices-body">
+    {pageSize !== null ? (
+      <AllNoticesContent page={page} pageSize={pageSize} onPageChange={setPage} onSelect={onSelect} />
+    ) : (
+      <div className="all-notices-stage" role="region" aria-label="全部公告列表">
+        <RequestState loading />
+      </div>
+    )}
   </div>;
+}
+
+function AllNoticesContent({
+  page,
+  pageSize,
+  onPageChange,
+  onSelect,
+}: {
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onSelect: (notice: Notice) => void;
+}) {
+  const result = usePortalRequest<Page<Notice>>(`/notices?page=${page}&pageSize=${pageSize}`);
+  const activeData = result.data ?? result.previousData;
+  return <>
+    <div className={`all-notices-stage${result.loading && activeData ? ' is-loading' : ''}`} role="region" aria-label="全部公告列表" aria-busy={result.loading}>
+      {result.error ? <RequestState {...result} /> : activeData?.items.length ? <NoticeList notices={activeData.items} onSelect={onSelect} /> : <RequestState {...result} />}
+    </div>
+    {activeData && <Pagination data={activeData} disabled={result.loading} onChange={onPageChange} />}
+  </>;
 }

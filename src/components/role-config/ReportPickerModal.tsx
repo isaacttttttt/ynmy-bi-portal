@@ -5,6 +5,7 @@ import { Modal } from 'antd';
 import { BarChart2, ClipboardEdit, ExternalLink, FileSpreadsheet, Search, CheckCircle2 } from 'lucide-react';
 import type { EntryType, RoleAvailableReport } from '@/lib/portal-model';
 import { themeFor, typeLabel } from '@/lib/portal-model';
+import { createSearchHighlighter } from '@/components/portal/highlight-search-text';
 import ScrollArea from '@/components/portal/ScrollArea';
 
 function ReportTypeIcon({ type }: { type: Exclude<EntryType, 'folder'> }) {
@@ -38,6 +39,8 @@ export default function ReportPickerModal({
       setSelectedIds(new Set());
     }
   }, [open]);
+
+  const highlight = useMemo(() => createSearchHighlighter(keyword), [keyword]);
 
   const filtered = useMemo(() => {
     const q = keyword.trim().toLocaleLowerCase();
@@ -163,8 +166,8 @@ export default function ReportPickerModal({
                       <ReportTypeIcon type={report.reportType} />
                     </span>
                     <span className="role-picker-copy">
-                      <strong>{report.reportName}</strong>
-                      <small title={description}>{description}</small>
+                      <strong>{highlight(report.reportName)}</strong>
+                      <small title={description}>{highlight(description)}</small>
                     </span>
                     <span className={`role-type-pill tone-${themeFor(report.reportType)}`}>
                       {typeLabel[report.reportType]}
