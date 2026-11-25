@@ -16,8 +16,8 @@ export default function DictionaryGrid({ result, onPage, query, onReset, view }:
   const highlight = createSearchHighlighter(query);
   return <section className="panel dictionary-panel">
     <div className="section-heading"><div className="heading-with-count"><SectionTitle>报表字典</SectionTitle><span className="muted" role="status">{data ? `${data.total} 份报表` : result.loading && <Skeleton className="h-4 w-20" />}</span></div>
+      <p className="dictionary-summary"><span>{query ? `“${query}” 的搜索结果` : ''}</span><button className="text-button" onClick={onReset}>清除全部条件</button></p>
     </div>
-    <p className="dictionary-summary"><span>{query ? `“${query}” 的搜索结果` : ''}</span><button className="text-button" onClick={onReset}>清除全部条件</button></p>
     <div className="dictionary-results" role="region" aria-label="报表字典列表" aria-busy={result.loading}>{data?.items.length ? <div className={view === 'grid' ? 'dictionary-grid' : 'dictionary-list'}>{data.items.map(report => {
       const content = <>
         <button className="card-main" onClick={() => setSelected(report)}><h3 className="dictionary-title"><span>{highlight(report.name)}</span><Tooltip title={report.permission === 'granted' ? '当前账号有权限访问此报表' : '当前账号无访问权限，可查看报表说明'}><span className={`permission-badge ${report.permission}`}>{report.permission === 'granted' ? '有权限' : '无权限'}</span></Tooltip></h3><p>{highlight(report.description)}</p></button>
