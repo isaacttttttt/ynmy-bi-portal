@@ -16,14 +16,14 @@ export default function PortalGuide({ dictionary }: { dictionary: boolean }) {
     document.addEventListener('keydown', escape); return () => document.removeEventListener('keydown', escape);
   }, [open]);
   const steps = [
-    ['.portal-search', '从搜索开始', '点击搜索框查看最近打开的报表。切换报表、标签或指标，输入关键词即可查找；确认搜索后保存到你的搜索记录。'],
+    ['.portal-search', '快速搜索报表', '点击搜索框即可查看最近看过的报表；也可切换「综合、报表、指标、标签」输入关键词查找，搜过的词会自动保存，方便下次直接点选。'],
     ...(dictionary ? [
-      ['.filters', '组合筛选报表', '按业务模块、状态、数据时效和累计访问量筛选，结果仅包含你有权限查看的报表。'],
-      ['.dictionary-panel', '查看口径与打开报表', '查看详情了解负责人、数据来源和指标口径，也可以收藏或直接在平台打开。'],
+      ['.filters', '按条件筛选报表', '勾选左侧的所属组织、报表状态、权限状态、数据时效或访问量级，就能快速缩小范围，精准找到目标报表。'],
+      ['.dictionary-panel', '看口径、直接打开报表', '点击「查看详情」可了解报表用途、指标口径、数据来源和负责人；有访问权限的报表点右下角即可直接打开，常用的还能点星标收藏。'],
     ] : [
-      ['.workbench .segmented', '切换你的工作台', '最近打开、我常用的和我收藏的使用页面缓存，切换无需等待。列表每 10 分钟静默更新。'],
-      ['.thematic', '逐级探索专题', '按角色切换专题分析，通过面包屑切换角色或进入专题目录，查看已授权的报表。'],
-      ['.dictionary-link', '了解每份报表', '进入报表字典，查看报表说明、负责人、数据来源和指标口径。'],
+      ['.workbench .segmented', '切换我的工作台', '在这里可以快速切换「最近打开」「我常用的」和「我收藏的」，点击卡片即可直接打开报表，不用再到处翻找。'],
+      ['.thematic', '按业务专题找报表', '点击卡片即可逐层进入对应专题并打开报表；如拥有多个岗位角色，可点击右上角下拉框切换查看，进入目录后也可通过上方路径随时返回上一级。'],
+      ['.dictionary-link', '查看报表字典', '想了解某张报表怎么看、指标怎么算或找谁对接？点击这里进入报表字典，可查看完整说明、指标口径、数据来源和负责人。'],
     ]),
   ];
   return <><button className="guide-trigger" onClick={() => { setCurrent(0); setOpen(true); }}><CircleHelp size={14} />使用引导</button>

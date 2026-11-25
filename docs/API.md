@@ -127,7 +127,7 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 
 ## GET /search
 
-参数 `category=all|report|tag|metric`（默认 all）、`q`（默认空，最多200字符）。先检查权限，再从在用报表中搜索，单类最多返回20项及匹配总数；综合按报表、标签、指标顺序合并各类结果，最多60项。标签对应 `business_module`，指标对应 `core_metrics`，不新增独立标签模型。
+参数 `category=all|report|metric|tag`（默认 all）、`q`（默认空，最多200字符）。先检查权限，再从在用报表中搜索，单类最多返回20项及匹配总数；综合按报表、指标、标签顺序合并各类结果，最多60项。标签对应 `business_module`，指标对应 `core_metrics`，不新增独立标签模型。
 
 `data` 为 `{items:[{category,value,subtitle,report?}],total}`。报表项带完整 `Report`，可调用平台打开；标签、指标项去重，subtitle 给出当前授权范围内的相关报表数。点击标签或指标后，前端携带 q、category 进入字典。输入为空时，下拉层直接从工作台 recent 缓存提取最近报表及其标签、指标；不显示“猜你想搜”。
 
@@ -172,7 +172,7 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 
 ## GET /notices
 
-参数 `page`、`pageSize`（首页5，全部公告10）；返回 `Page<Notice>`。
+参数 `page`、`pageSize`（首页7，全部公告10）；返回 `Page<Notice>`。
 
 ```json
 {"id":"notice-123","title":"标题","category":"通知","pinned":true,"publishedOn":"2026-10-22","content":"正文纯文本","url":"https://example.internal/notice"}

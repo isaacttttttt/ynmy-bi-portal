@@ -81,9 +81,9 @@ export type WorkbenchTab = 'recent' | 'frequent' | 'favorites';
 export type WorkbenchData = Record<WorkbenchTab, Report[]>;
 export type FilterKey = 'organization' | 'status' | 'permission' | 'frequency' | 'volume';
 export type Filters = Record<FilterKey, string[]>;
-export const searchCategories = ['all', 'report', 'tag', 'metric'] as const;
+export const searchCategories = ['all', 'report', 'metric', 'tag'] as const;
 export type SearchCategory = typeof searchCategories[number];
-export const searchLabels: Record<SearchCategory, string> = { all: '综合', report: '报表', tag: '标签', metric: '指标' };
+export const searchLabels: Record<SearchCategory, string> = { all: '综合', report: '报表', metric: '指标', tag: '标签' };
 export interface SearchHistory { items: { query: string; searchedAt: string }[] }
 export interface SearchItem { category: Exclude<SearchCategory, 'all'>; value: string; subtitle: string; report?: Report }
 export interface SearchResult { items: SearchItem[]; total: number }
@@ -169,7 +169,7 @@ export function searchCatalog(reports: Report[], category: SearchCategory, query
       if (items.length < 20) items.push({ category: 'report', value: report.name, subtitle: `${typeLabel[report.type]} · ${report.module}`, report });
     }
   }
-  for (const [group, counts] of [['tag', tags], ['metric', metrics]] as const) {
+  for (const [group, counts] of [['metric', metrics], ['tag', tags]] as const) {
     let remaining = 20;
     for (const [value, count] of counts) {
       if (remaining-- === 0) break;

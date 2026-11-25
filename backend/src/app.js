@@ -140,7 +140,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
       return { success: true, data: { items: [] } };
     });
     api.get('/notices', { config: { needTree: false } }, async request => {
-      const query = pageQuery(request.query, { defaultSize: 5 });
+      const query = pageQuery(request.query, { defaultSize: 7 });
       return { success: true, data: paginate(await noticesFor(db, request.portal, { fineDb: resolvedFineDb }), query.page, query.pageSize) };
     });
     api.post('/favorites/:entryId', { schema: { body: { type: 'object', required: ['favorite'], additionalProperties: false, properties: { favorite: { type: 'boolean' } } } } }, async request => {

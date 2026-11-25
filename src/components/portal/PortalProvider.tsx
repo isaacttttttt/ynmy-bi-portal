@@ -115,5 +115,5 @@ export function RequestState({ loading, error, retry }: { loading?: boolean; err
 }
 export function Pagination({ data, onChange }: { data: Pick<Page<unknown>, 'total' | 'page' | 'pageSize'>; onChange: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(data.total / data.pageSize));
-  return <nav className="pagination" aria-label="分页"><span>共 {data.total} 项</span><button className="icon-button" aria-label="上一页" disabled={data.page <= 1} onClick={() => onChange(data.page - 1)}><ChevronLeft size={16} /></button><span>{data.page} / {pages}</span><button className="icon-button" aria-label="下一页" disabled={data.page >= pages} onClick={() => onChange(data.page + 1)}><ChevronRight size={16} /></button></nav>;
+  return <nav className="pagination" aria-label="分页"><span className="pagination-total">共 {data.total} 项</span><button className="icon-button pagination-btn" aria-label="上一页" disabled={data.page <= 1} onClick={() => onChange(data.page - 1)}><ChevronLeft size={18} strokeWidth={2.4} /></button><span className="pagination-page">{data.page} / {pages}</span><button className="icon-button pagination-btn" aria-label="下一页" disabled={data.page >= pages} onClick={() => onChange(data.page + 1)}><ChevronRight size={18} strokeWidth={2.4} /></button></nav>;
 }

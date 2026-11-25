@@ -11,7 +11,7 @@ export default function PortalHeader({ dictionary = false, query = '', category,
       <Link href="/" className="brand-logo" aria-label="云南白药数据门户首页"><img src="/portal/assets/company_title.png" alt="云南白药 YUNNANBAIYAO" /></Link>
       <div className="brand-copy"><h1>{dictionary ? '数据门户 · 报表字典' : '云南白药集团 · 数据门户'}</h1>{!dictionary && <p>数据驱动经营 · 智慧赋能决策</p>}</div>
       <div className="header-tools"><div className="header-help"><span className="environment-label">企业数据门户</span><PortalGuide dictionary={dictionary} /></div>
-        {dictionary && <Link href="/" className="home-link"><ArrowLeft size={14} />返回首页</Link>}
+        {dictionary && <Link href="/" className="home-link"><ArrowLeft size={17} strokeWidth={2.3} />返回首页</Link>}
       </div>
     </div>
     <div className="search-row">
