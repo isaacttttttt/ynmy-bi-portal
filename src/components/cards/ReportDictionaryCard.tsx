@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Clock, User, Database, TrendingUp } from "lucide-react";
+import { Clock, User, Database } from "lucide-react";
 
 interface ReportDictionaryCardProps {
   report: {
@@ -114,7 +114,7 @@ export default function ReportDictionaryCard({
                 <span>{report.updateFrequency}</span>
               </div>
               <div className="flex items-center gap-1">
-                <TrendingUp className="w-3 h-3" />
+                <img className="w-3.5 h-3.5 object-contain" src="/portal/assets/icon-flame.png" alt="" aria-hidden="true" />
                 <span>{report.totalViews.toLocaleString()} 次访问</span>
               </div>
             </div>
@@ -184,7 +184,8 @@ export default function ReportDictionaryCard({
         </div>
         <div className="flex items-center justify-between text-xs">
           <span className="text-gray-500">{report.module}</span>
-          <span className="text-blue-600 font-medium">
+          <span className="inline-flex items-center gap-1 text-blue-600 font-medium">
+            <img className="w-3.5 h-3.5 object-contain" src="/portal/assets/icon-flame.png" alt="" aria-hidden="true" />
             {report.totalViews.toLocaleString()} 次
           </span>
         </div>

@@ -89,7 +89,7 @@ HTTP 400 参数不合法；401 登录失效；403 资源无权访问；404 不�
 | 参数 | 类型 / 默认值 | 规则 |
 | --- | --- | --- |
 | q | string / 空 | 去前后空格，最多200字符；检索名称、描述、指标、Owner、数据源；英文忽略大小写 |
-| category | string / all | `all` 综合检索报表、业务模块和指标；`report` 按上述字段检索；`tag` 只查业务模块；`metric` 只查 core_metrics |
+| category | string / all | `all` 综合检索报表、标签（`dim_bi_report_dictionary.tags`）和指标；`report` 按上述字段检索；`tag` 只查 `dim_bi_report_dictionary.tags`；`metric` 只查 `core_metrics` |
 | organization | 重复 query 参数 | 所属组织，取 `report_owner_dept`，空值显示“暂未维护” |
 | permission | 重复 query 参数 | `granted`（有访问权限）、`denied`（无访问权限）；默认同时展示 |
 | status | 重复 query 参数 | `active`、`archived` |

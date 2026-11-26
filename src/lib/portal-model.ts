@@ -4,8 +4,9 @@ export interface Entry {
   templateId?: string; url?: string; iconUrl?: string; sort: number;
 }
 export interface Report extends Entry {
-  metadataId: string; description: string; module: string; businessGroup: string; department: string;
+  metadataId: string; description: string; module: string; tags?: string[]; businessGroup: string; department: string;
   owner: string; developer: string; developerDepartment: string; frequency: string; status: 'active' | 'archived';
+  registered?: boolean;
   permission: 'granted' | 'denied'; onlineOn: string | null; updateNote: string;
   source: string; metrics: string[]; views: number | null; visits30d: number;
   lastVisitedOn: string | null; useScene: string; calcLogic: string; updatedOn: string;
@@ -100,7 +101,7 @@ export const volume = (views: number) => views > 1000 ? 'high' : views >= 100 ? 
 export const typeLabel: Record<EntryType, string> = { folder: '专题目录', bi: 'BI 分析', fvs: '驾驶舱', frm: '填报', cpt: '报表', url: '外部链接' };
 export const themeFor = (type: EntryType) => type === 'folder' ? 'orange' : type === 'frm' ? 'purple' : type === 'cpt' ? 'teal' : 'blue';
 export const filterLabels: Record<FilterKey, string> = { organization: '所属组织', status: '报表状态', permission: '权限状态', frequency: '数据时效', volume: '访问量级' };
-export const optionLabels: Record<string, string> = { granted: '有访问权限', denied: '无访问权限', active: '在用', archived: '已归档', high: '高频（>1000）', medium: '中频（100–1000）', low: '低频（<100）' };
+export const optionLabels: Record<string, string> = { granted: '有访问权限', denied: '无访问权限', active: '在用', unregistered: '未登记', archived: '已下架', high: '高频（>1000）', medium: '中频（100–1000）', low: '低频（<100）' };
 export function paginate<T>(items: T[], page: number, pageSize: number): Page<T> {
   return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize };
 }
@@ -111,8 +112,9 @@ export function queryReports(reports: Report[], query: ReportQuery): ReportPage 
   const groups = keys.map(key => ({ key, selected: new Set(query.filters[key]), counts: new Map<string, number>() }));
   const matches: Report[] = [];
   for (const report of reports) {
+    const statusFacet = report.status === 'archived' ? 'archived' : report.registered === false ? 'unregistered' : 'active';
     const values = {
-      organization: report.businessGroup || '暂未维护', status: report.status, permission: report.permission,
+      organization: report.businessGroup || '暂未维护', status: statusFacet, permission: report.permission,
       frequency: report.frequency, volume: report.views === null ? '' : volume(report.views),
     };
     const searched = matchesReportQuery(report, query.category ?? 'all', q);
@@ -120,14 +122,15 @@ export function queryReports(reports: Report[], query: ReportQuery): ReportPage 
     let exclusions = 0;
     for (const { key, selected, counts } of groups) {
       const value = values[key];
-      if (!counts.has(value)) counts.set(value, 0);
+      if (value && !counts.has(value)) counts.set(value, 0);
       if (selected.size && !selected.has(value)) { excludedBy = key; exclusions++; }
     }
     if (!searched || exclusions > 1) continue;
     if (!excludedBy) matches.push(report);
     // A facet ignores its own filter, so a report excluded by one group still counts for that group.
     for (const { key, counts } of groups) {
-      if (!excludedBy || excludedBy === key) counts.set(values[key], counts.get(values[key])! + 1);
+      const value = values[key];
+      if (value && (!excludedBy || excludedBy === key)) counts.set(value, (counts.get(value) ?? 0) + 1);
     }
   }
   const facets: ReportPage['facets'] = { organization: [], status: [], permission: [], frequency: [], volume: [] };
@@ -138,10 +141,15 @@ function matchesText(value: string, q: string) { return !q || value.toLocaleLowe
 function matchesReportFields(report: Report, q: string) {
   return matchesText(report.name, q) || matchesText(report.description, q) || matchesText(report.owner, q) || matchesText(report.source, q);
 }
+function reportTags(report: Report): string[] {
+  return (report.tags ?? []).filter(Boolean);
+}
 function matchesReportQuery(report: Report, category: SearchCategory, q: string) {
-  if (category === 'tag') return matchesText(report.module, q);
-  if (category === 'metric') return report.metrics.some(metric => matchesText(metric, q));
-  return matchesReportFields(report, q) || (category === 'all' && matchesText(report.module, q)) || report.metrics.some(metric => matchesText(metric, q));
+  if (category === 'tag') return !q || reportTags(report).some(tag => matchesText(tag, q));
+  if (category === 'metric') return !q || report.metrics.some(metric => matchesText(metric, q));
+  return matchesReportFields(report, q)
+    || (category === 'all' && reportTags(report).some(tag => matchesText(tag, q)))
+    || report.metrics.some(metric => matchesText(metric, q));
 }
 export function searchCatalog(reports: Report[], category: SearchCategory, query: string): SearchResult {
   const q = query.trim().toLocaleLowerCase();
@@ -153,10 +161,14 @@ export function searchCatalog(reports: Report[], category: SearchCategory, query
   let reportTotal = 0;
   for (const report of reports) {
     if (report.status !== 'active') continue;
-    if (wantTags && report.module && matchesText(report.module, q)) {
-      tags.set(report.module, (tags.get(report.module) || 0) + 1);
-    }
     let reportMatch = wantReports && matchesReportFields(report, q);
+    if (wantTags) {
+      for (const tag of new Set(reportTags(report))) {
+        if (!tag || !matchesText(tag, q)) continue;
+        tags.set(tag, (tags.get(tag) || 0) + 1);
+        if (wantReports && q) reportMatch = true;
+      }
+    }
     if (wantMetrics) {
       for (const metric of new Set(report.metrics)) {
         if (!metric || !matchesText(metric, q)) continue;

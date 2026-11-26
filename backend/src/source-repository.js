@@ -1,11 +1,37 @@
 import { fineDbSchema } from './config/database.js';
 import { ApiError, businessDate, publicUrl } from './http.js';
+import { inferReportTypeFromAuthorityObject } from './role-thematic-repository.js';
 
-const METADATA_COLUMNS = `r.report_name AS catalog_name, r.report_type, r.report_total_views AS total_views,
+const FINEDB_FALLBACK_CODES = new Set(['42P01', '42703', '3F000', '42501']);
+const DIRECTORY_ROOT_ID = 'decision-directory-root';
+
+const METADATA_COLUMNS_BASE = `r.report_name AS catalog_name, r.report_type, r.report_total_views AS total_views,
   d.report_name AS dictionary_name, d.report_description,
   d.business_domain, d.business_group, d.belonging_department, d.suggested_owner_name, d.developer_name,
   d.update_cycle, nullif(trim(d.go_live_time),'')::date::text AS online_on, d.usage_scenario,
   d.core_metrics, d.metrics_calc_logic, d.data_source`;
+const METADATA_COLUMNS_WITH_TAGS = `${METADATA_COLUMNS_BASE}, d.tags`;
+const METADATA_COLUMNS_NO_TAGS = `${METADATA_COLUMNS_BASE}, NULL::text AS tags`;
+
+function parseTags(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(v => String(v ?? '').trim()).filter(Boolean))];
+  }
+  if (typeof value !== 'string') return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return [...new Set(parsed.map(v => String(v ?? '').trim()).filter(Boolean))];
+      }
+    } catch {
+      // Fall back to delimiter splitting if malformed JSON array string.
+    }
+  }
+  return [...new Set(trimmed.split(/[、，,；;\n]+/).map(v => v.trim().replace(/[。；;]+$/, '')).filter(Boolean))];
+}
 
 function visitReadTimedOut(error) {
   return ['57014', '55P03'].includes(error.code) || error.message === 'Query read timeout';
@@ -39,19 +65,26 @@ export async function bootstrapDate(db, log, { cache } = {}) {
   }
 }
 
-function mapReportRow(row, context, entries, visit) {
-  const entry = entries.get(row.report_id);
-  const granted = Boolean(row.report_id && context.ids.has(row.report_id));
+function mapReportRow(row, context, entries, visit, options = {}) {
+  const reportId = typeof row.report_id === 'string' ? row.report_id.trim() : '';
+  const entry = reportId ? entries.get(reportId) : undefined;
+  const granted = Boolean(reportId && context.ids.has(reportId));
+  const status = options.status ?? 'active';
+  const registered = options.registered ?? true;
+  const rawType = options.resolvedType ?? row.report_type;
+  const resolvedType = ['bi', 'fvs', 'frm', 'cpt', 'url'].includes(rawType?.toLowerCase()) ? rawType.toLowerCase() : 'cpt';
   return {
-    id: row.report_id || `dictionary:${row.dictionary_id}`,
+    id: reportId || `dictionary:${row.dictionary_id}`,
     parentId: null,
     sort: 0,
-    type: ['bi', 'fvs', 'frm', 'cpt', 'url'].includes(row.report_type?.toLowerCase()) ? row.report_type.toLowerCase() : 'cpt',
+    type: resolvedType,
     ...entry,
-    metadataId: row.dictionary_id || row.report_id,
-    name: row.dictionary_name?.trim() || entry?.name || row.catalog_name || '未命名报表',
+    ...(entry?.type && entry.type !== 'folder' ? { type: entry.type } : { type: resolvedType }),
+    metadataId: row.dictionary_id || reportId,
+    name: row.dictionary_name?.trim() || entry?.name || options.liveName || row.catalog_name || '未命名报表',
     description: row.report_description || '',
     module: row.business_domain || '',
+    tags: parseTags(row.tags),
     businessGroup: row.business_group?.trim() || '',
     department: row.belonging_department || '',
     owner: row.suggested_owner_name || '',
@@ -59,7 +92,8 @@ function mapReportRow(row, context, entries, visit) {
     developerDepartment: '',
     permission: granted ? 'granted' : 'denied',
     frequency: ({ '实时数据': '实时', '每日更新一次': '每日更新', '每月更新一次': '月更新', '其它': '其他' })[row.update_cycle] || row.update_cycle || '',
-    status: 'active',
+    status,
+    registered,
     onlineOn: row.online_on || null,
     updateNote: '',
     source: row.data_source || '',
@@ -67,21 +101,238 @@ function mapReportRow(row, context, entries, visit) {
     useScene: row.usage_scenario || '',
     calcLogic: row.metrics_calc_logic || '',
     updatedOn: '',
-    views: parseTotalViews(row.total_views),
+    views: parseTotalViews(row.total_views ?? options.fallbackViews),
     visits30d: Number(visit?.visits30d ?? row.visits30d ?? 0),
     lastVisitedOn: visit?.last_visited ?? row.last_visited ?? null,
   };
 }
 
-async function loadDictionaryRows(db, cache, log) {
+export function extractLiveDirectoryReports(rows) {
+  const byId = new Map();
+  const childrenByParent = new Map();
+  for (const row of rows) {
+    const id = typeof row.id === 'string' ? row.id.trim() : '';
+    if (!id || byId.has(id)) continue;
+    const expandType = row.expand_type === null || row.expand_type === undefined ? null : Number(row.expand_type);
+    if (expandType === 1 || expandType === 2) continue;
+    const parentId = typeof row.parent_id === 'string' && row.parent_id.trim() ? row.parent_id.trim() : null;
+    const displayName = typeof row.display_name === 'string' ? row.display_name.trim() : '';
+    const objectPath = typeof row.object_path === 'string' ? row.object_path.trim() : '';
+    const node = { id, parentId, displayName, expandType, objectPath };
+    byId.set(id, node);
+    if (parentId) {
+      const list = childrenByParent.get(parentId) || [];
+      list.push(node);
+      childrenByParent.set(parentId, list);
+    }
+  }
+
+  const hasDirectoryRoot = byId.has(DIRECTORY_ROOT_ID) || childrenByParent.has(DIRECTORY_ROOT_ID);
+  const candidates = [];
+  if (hasDirectoryRoot) {
+    const visited = new Set([DIRECTORY_ROOT_ID]);
+    const queue = [];
+    for (const child of childrenByParent.get(DIRECTORY_ROOT_ID) || []) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
+      queue.push({ node: child, depth: 1 });
+    }
+    let head = 0;
+    while (head < queue.length) {
+      const { node, depth } = queue[head++];
+      candidates.push(node);
+      if (depth >= 32) continue;
+      for (const child of childrenByParent.get(node.id) || []) {
+        if (visited.has(child.id)) continue;
+        visited.add(child.id);
+        queue.push({ node: child, depth: depth + 1 });
+      }
+    }
+  } else {
+    for (const node of byId.values()) candidates.push(node);
+  }
+
+  const liveReports = new Map();
+  for (const node of candidates) {
+    if (node.id.includes('decision') || node.expandType === null || [1, 2, 3].includes(node.expandType)) continue;
+    liveReports.set(node.id, {
+      id: node.id,
+      displayName: node.displayName,
+      expandType: node.expandType,
+      objectPath: node.objectPath,
+      reportType: inferReportTypeFromAuthorityObject(node.expandType, node.objectPath),
+    });
+  }
+  return liveReports;
+}
+
+export async function loadLiveFineDbReports(fineDb, { env = process.env } = {}) {
+  const schema = fineDbSchema(env);
+  const { rows } = await fineDb.query(
+    `/* portal: finedb live directory reports */
+     SELECT fao.id,
+            fao.parentid AS parent_id,
+            fao.displayname AS display_name,
+            fao.expandtype AS expand_type,
+            fao.path AS object_path
+     FROM ${schema}.fine_authority_object fao
+     WHERE fao.id IS NOT NULL
+       AND trim(fao.id) <> ''
+       AND coalesce(fao.expandtype, 0) NOT IN (1, 2)`,
+  );
+  return extractLiveDirectoryReports(rows);
+}
+
+export function createLiveDirectoryStore({
+  fineDb,
+  ttlMs = 300000,
+  refreshIntervalMs = ttlMs > 0 ? Math.max(1000, Math.floor(ttlMs * 0.8)) : 0,
+  env = process.env,
+  log,
+} = {}) {
+  if (!Number.isSafeInteger(ttlMs) || ttlMs < 0 || ttlMs > 2147483647) {
+    throw new Error('Invalid FINEDB_DIRECTORY_CACHE_TTL_SECONDS');
+  }
+  if (!Number.isSafeInteger(refreshIntervalMs) || refreshIntervalMs < 0 || refreshIntervalMs > 2147483647) {
+    throw new Error('Invalid FINEDB_DIRECTORY_REFRESH_INTERVAL_SECONDS');
+  }
+  let snapshot = null; // { value: Map, expiresAt: number } | null
+  let inFlight = null;
+  let timer = null;
+  let closed = false;
+
+  async function fetchAndStore(trigger, callLog = log) {
+    if (inFlight) {
+      callLog?.info({ stage: 'finedb-directory-cache', trigger, result: 'shared' }, 'finedb directory cache');
+      return inFlight;
+    }
+    const promise = (async () => {
+      const startedAt = Date.now();
+      const liveReports = await loadLiveFineDbReports(fineDb, { env });
+      const now = Date.now();
+      if (!closed && ttlMs > 0) {
+        snapshot = { value: liveReports, expiresAt: now + ttlMs };
+      }
+      callLog?.info({
+        stage: 'finedb-directory-cache',
+        trigger,
+        result: 'refreshed',
+        count: liveReports.size,
+        durationMs: now - startedAt,
+        ttlMs,
+      }, 'finedb directory cache');
+      return liveReports;
+    })().finally(() => {
+      inFlight = null;
+    });
+    inFlight = promise;
+    return promise;
+  }
+
+  async function get({ log: callLog = log } = {}) {
+    if (!fineDb) return null;
+    const now = Date.now();
+    if (ttlMs > 0 && snapshot && snapshot.expiresAt > now) {
+      callLog?.info({ stage: 'finedb-directory-cache', result: 'hit', count: snapshot.value.size }, 'finedb directory cache');
+      return snapshot.value;
+    }
+    try {
+      return await fetchAndStore('demand', callLog);
+    } catch (error) {
+      if (snapshot && !FINEDB_FALLBACK_CODES.has(error.code)) {
+        callLog?.warn(
+          { stage: 'finedb-directory-cache', result: 'stale-fallback', code: error.code, reason: error.message },
+          'finedb directory refresh failed, serving stale snapshot',
+        );
+        return snapshot.value;
+      }
+      throw error;
+    }
+  }
+
+  function start() {
+    if (closed || !fineDb || ttlMs <= 0 || refreshIntervalMs <= 0 || timer) return;
+    timer = setInterval(() => {
+      if (closed) return;
+      void fetchAndStore('timer', log).catch(error => {
+        log?.warn(
+          { stage: 'finedb-directory-cache', trigger: 'timer', result: 'error', code: error.code, reason: error.message },
+          'finedb directory background refresh failed',
+        );
+      });
+    }, refreshIntervalMs);
+    timer.unref();
+  }
+
+  function invalidate() {
+    snapshot = null;
+  }
+
+  function stop() {
+    closed = true;
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    snapshot = null;
+    inFlight = null;
+  }
+
+  return {
+    get,
+    refresh: () => fetchAndStore('manual', log),
+    start,
+    invalidate,
+    stop,
+    get hasSnapshot() {
+      return snapshot !== null;
+    },
+  };
+}
+
+async function loadReportInfoLookup(db, cache, log) {
   const load = async () => {
-    const { rows } = await db.query(
-      `/* portal: dictionary metadata */ SELECT d.report_id, d.id AS dictionary_id, ${METADATA_COLUMNS}
+    try {
+      const { rows } = await db.query(
+        `/* portal: report info views lookup */
+         SELECT report_id, report_name, report_type, report_total_views AS total_views
+         FROM dim_bi_report_info_dtl
+         WHERE report_id IS NOT NULL AND trim(report_id) <> ''`,
+      );
+      return new Map(rows.map(row => [row.report_id.trim(), row]));
+    } catch (error) {
+      if (!['42P01', '42703'].includes(error.code)) throw error;
+      log?.warn({ stage: 'report-info-lookup', code: error.code, reason: error.message }, 'dim_bi_report_info_dtl unavailable for live dictionary views');
+      return new Map();
+    }
+  };
+  if (!cache) return load();
+  return cache.getOrLoad('report-info-lookup', load, {
+    onEvent: result => log?.info({ stage: 'catalog-cache', key: 'report-info-lookup', result }, 'catalog cache'),
+  });
+}
+
+async function queryMetadataRows(db, sqlBuilder, log, label) {
+  try {
+    const { rows } = await db.query(sqlBuilder(METADATA_COLUMNS_WITH_TAGS));
+    return rows;
+  } catch (error) {
+    if (error.code !== '42703') throw error;
+    log?.warn({ stage: label, code: error.code, reason: error.message }, 'dim_bi_report_dictionary.tags unavailable, falling back without tags');
+    const { rows } = await db.query(sqlBuilder(METADATA_COLUMNS_NO_TAGS));
+    return rows;
+  }
+}
+
+async function loadDictionaryRows(db, cache, log) {
+  const load = () => queryMetadataRows(
+    db,
+    columns => `/* portal: dictionary metadata */ SELECT d.report_id, d.id AS dictionary_id, ${columns}
        FROM dim_bi_report_dictionary d LEFT JOIN dim_bi_report_info_dtl r USING (report_id)
        ORDER BY coalesce(nullif(d.report_name,''),r.report_name), d.id`,
-    );
-    return rows;
-  };
+    log,
+    'dictionary-metadata',
+  );
   if (!cache) return load();
   return cache.getOrLoad('dictionary-rows', load, {
     onEvent: result => log?.info({ stage: 'catalog-cache', key: 'dictionary-rows', result }, 'catalog cache'),
@@ -89,25 +340,107 @@ async function loadDictionaryRows(db, cache, log) {
 }
 
 async function loadCatalogRows(db, cache, log) {
-  const load = async () => {
-    const { rows } = await db.query(
-      `/* portal: catalog metadata */ SELECT r.report_id, ${METADATA_COLUMNS}
+  const load = () => queryMetadataRows(
+    db,
+    columns => `/* portal: catalog metadata */ SELECT r.report_id, ${columns}
        FROM dim_bi_report_info_dtl r LEFT JOIN dim_bi_report_dictionary d USING (report_id)
        ORDER BY coalesce(nullif(d.report_name,''),r.report_name), r.report_id`,
-    );
-    return rows;
-  };
+    log,
+    'catalog-metadata',
+  );
   if (!cache) return load();
   return cache.getOrLoad('catalog-rows', load, {
     onEvent: result => log?.info({ stage: 'catalog-cache', key: 'catalog-rows', result }, 'catalog cache'),
   });
 }
 
-export async function reportsFor(db, context, dictionary = false, { includeUserVisits = !dictionary, cache } = {}) {
+function dictionarySortRank(report) {
+  if (report.status === 'archived') return 2;
+  return report.registered === false ? 1 : 0;
+}
+
+export async function reportsFor(db, context, dictionary = false, { includeUserVisits = !dictionary, cache, fineDb = null, directoryStore = null, env = process.env } = {}) {
   if (!dictionary && !context.ids.size) return [];
   const entries = context.entryMap ?? new Map(context.entries.map(entry => [entry.id, entry]));
 
   if (dictionary) {
+    let liveReports = null;
+    if (directoryStore || fineDb) {
+      try {
+        liveReports = directoryStore
+          ? await directoryStore.get({ log: context.log })
+          : await loadLiveFineDbReports(fineDb, { env });
+      } catch (error) {
+        if (!FINEDB_FALLBACK_CODES.has(error.code)) throw error;
+        context.log?.warn({ stage: 'dictionary-finedb', code: error.code, reason: error.message }, 'finedb fine_authority_object unavailable, falling back to dim_bi_report_dictionary');
+      }
+    }
+
+    if (liveReports) {
+      const [dictRows, infoByReportId] = await Promise.all([
+        loadDictionaryRows(db, cache, context.log),
+        loadReportInfoLookup(db, cache, context.log),
+      ]);
+      const matchedLiveIds = new Set();
+      const merged = [];
+
+      for (const row of dictRows) {
+        const reportId = typeof row.report_id === 'string' ? row.report_id.trim() : '';
+        if (!reportId) continue;
+        if (entries.get(reportId)?.type === 'folder') continue;
+        const live = liveReports.get(reportId);
+        const info = infoByReportId.get(reportId);
+        if (live) {
+          matchedLiveIds.add(reportId);
+          merged.push(mapReportRow(row, context, entries, undefined, {
+            status: 'active',
+            registered: true,
+            liveName: live.displayName,
+            resolvedType: inferReportTypeFromAuthorityObject(live.expandType, live.objectPath, row.report_type ?? info?.report_type),
+            fallbackViews: info?.total_views,
+          }));
+        } else {
+          merged.push(mapReportRow(row, context, entries, undefined, {
+            status: 'archived',
+            registered: true,
+            fallbackViews: info?.total_views,
+          }));
+        }
+      }
+
+      for (const live of liveReports.values()) {
+        if (matchedLiveIds.has(live.id)) continue;
+        if (entries.get(live.id)?.type === 'folder') continue;
+        const info = infoByReportId.get(live.id);
+        merged.push(mapReportRow(
+          {
+            report_id: live.id,
+            dictionary_id: null,
+            catalog_name: info?.report_name ?? live.displayName,
+            report_type: info?.report_type ?? live.reportType,
+            total_views: info?.total_views ?? 0,
+            dictionary_name: null,
+          },
+          context,
+          entries,
+          undefined,
+          {
+            status: 'active',
+            registered: false,
+            liveName: live.displayName,
+            resolvedType: inferReportTypeFromAuthorityObject(live.expandType, live.objectPath, info?.report_type),
+            fallbackViews: info?.total_views,
+          },
+        ));
+      }
+
+      return merged.sort((a, b) =>
+        dictionarySortRank(a) - dictionarySortRank(b)
+        || a.name.localeCompare(b.name, 'zh-CN')
+        || a.id.localeCompare(b.id),
+      );
+    }
+
     const rows = await loadDictionaryRows(db, cache, context.log);
     return rows
       .filter(row => entries.get(row.report_id)?.type !== 'folder')

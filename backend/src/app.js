@@ -17,34 +17,51 @@ import { queryReports, paginate, descendants, searchCatalog, searchCategories } 
 const { basePath } = portalConfig;
 
 function cacheTtlMs(raw, fallbackSeconds, name) {
-  const ms = Number(raw ?? fallbackSeconds) * 1000;
+  const normalized = typeof raw === 'string' ? raw.trim() : raw;
+  const value = normalized === undefined || normalized === '' ? fallbackSeconds : normalized;
+  const ms = Number(value) * 1000;
   if (!Number.isSafeInteger(ms) || ms < 0 || ms > 2147483647) throw new Error(`Invalid ${name}`);
   return ms;
 }
 
 export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
   const ownsFineDb = fineDb === undefined;
-  const resolvedFineDb = fineDb ?? createFineDbPool(process.env) ?? db;
-  platform ||= platformClient(process.env, resolvedFineDb);
+  const resolvedFineDb = fineDb === undefined ? (createFineDbPool(process.env) ?? db) : fineDb;
+  platform ||= platformClient(process.env, resolvedFineDb ?? db);
   const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
   const rootId = process.env.FINE_ROOT_ID || '';
-  const { reportsFor, noticesFor, quickEntries, bootstrapDate } = sourceRepository;
+  const { reportsFor, noticesFor, quickEntries, bootstrapDate, createLiveDirectoryStore } = sourceRepository;
   const thematicCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.PORTAL_THEMATIC_CACHE_TTL_SECONDS, 60, 'PORTAL_THEMATIC_CACHE_TTL_SECONDS'), maxEntries: 2000 });
   const catalogCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.PORTAL_CATALOG_CACHE_TTL_SECONDS, 60, 'PORTAL_CATALOG_CACHE_TTL_SECONDS'), maxEntries: 32 });
   const userRolesCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.FINEDB_USER_ROLES_CACHE_TTL_SECONDS, 30, 'FINEDB_USER_ROLES_CACHE_TTL_SECONDS'), maxEntries: 5000 });
   const fineObjectTreeCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.FINEDB_OBJECT_TREE_CACHE_TTL_SECONDS, 30, 'FINEDB_OBJECT_TREE_CACHE_TTL_SECONDS'), maxEntries: 4 });
+  const fineDirectoryTtlMs = cacheTtlMs(process.env.FINEDB_DIRECTORY_CACHE_TTL_SECONDS, 300, 'FINEDB_DIRECTORY_CACHE_TTL_SECONDS');
+  const rawRefreshInterval = process.env.FINEDB_DIRECTORY_REFRESH_INTERVAL_SECONDS?.trim();
+  const fineDirectoryRefreshMs = rawRefreshInterval !== undefined && rawRefreshInterval !== ''
+    ? cacheTtlMs(rawRefreshInterval, 0, 'FINEDB_DIRECTORY_REFRESH_INTERVAL_SECONDS')
+    : (fineDirectoryTtlMs > 0 ? Math.max(1000, Math.floor(fineDirectoryTtlMs * 0.8)) : 0);
   const stream = logStream(process.env.PORTAL_LOG_FILE);
   const app = Fastify({ logger: { level: 'info', stream, redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers.set-cookie'] },
     disableRequestLogging: true, genReqId: () => randomUUID(), requestIdHeader: false,
     bodyLimit: 524288, requestTimeout: 15000, ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
+  const fineDirectoryStore = resolvedFineDb
+    ? createLiveDirectoryStore({
+        fineDb: resolvedFineDb,
+        ttlMs: fineDirectoryTtlMs,
+        refreshIntervalMs: fineDirectoryRefreshMs,
+        env: process.env,
+        log: app.log,
+      })
+    : null;
   app.addHook('onClose', async () => {
+    fineDirectoryStore?.stop();
     thematicCache.clear();
     catalogCache.clear();
     userRolesCache.clear();
     fineObjectTreeCache.clear();
     await Promise.all([
       db.end(),
-      ...(ownsFineDb && resolvedFineDb !== db ? [resolvedFineDb.end()] : []),
+      ...(ownsFineDb && resolvedFineDb && resolvedFineDb !== db ? [resolvedFineDb.end()] : []),
     ]);
   });
   app.addHook('onClose', async () => { platform.close?.(); });
@@ -77,7 +94,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
   app.setNotFoundHandler((request, reply) => reply.code(404).send({ success: false, error: { code: 'NOT_FOUND', message: '接口不存在' }, requestId: request.id }));
   app.get('/health', async () => {
     await db.query('SELECT 1');
-    if (resolvedFineDb !== db) await resolvedFineDb.query('SELECT 1');
+    if (resolvedFineDb && resolvedFineDb !== db) await resolvedFineDb.query('SELECT 1');
     return { status: 'ok' };
   });
   await app.register(async api => {
@@ -101,7 +118,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
     });
     api.get('/reports', async request => {
       const query = pageQuery(request.query, { reports: true });
-      return { success: true, data: queryReports(await reportsFor(db, request.portal, true, { cache: catalogCache }), query) };
+      return { success: true, data: queryReports(await reportsFor(db, request.portal, true, { fineDb: resolvedFineDb, directoryStore: fineDirectoryStore, cache: catalogCache }), query) };
     });
     api.get('/workbench', async request => {
       const query = pageQuery(request.query, { workbench: true, defaultSize: 8 });
@@ -149,7 +166,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
       const entry = context.entryMap ? context.entryMap.get(id) : context.entries.find(e => e.id === id);
       if (!entry || entry.type === 'folder') throw new ApiError(404, 'NOT_FOUND', '报表不存在或无权访问');
       const [report = null] = await reportsFor(db, { ...context, ids: new Set(context.ids.has(id) ? [id] : []) }, false, { cache: catalogCache });
-      if (request.body.favorite && report?.status === 'archived') throw new ApiError(409, 'REPORT_ARCHIVED', '已归档报表不能新增收藏');
+      if (request.body.favorite && report?.status === 'archived') throw new ApiError(409, 'REPORT_ARCHIVED', '已下架报表不能新增收藏');
       const favorites = await platform.favorites(context);
       if (favorites.includes(id) !== request.body.favorite) await platform.favorite(context, id, request.body.favorite);
       return { success: true, data: { id, favorite: request.body.favorite, report } };
@@ -240,8 +257,9 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
   await app.register(staticFiles, { root: fileURLToPath(new URL('../../out/', import.meta.url)), prefix: `${basePath}/`, index: ['index.html'] });
   try {
     await db.query('SELECT 1');
-    if (resolvedFineDb !== db) await resolvedFineDb.query('SELECT 1');
+    if (resolvedFineDb && resolvedFineDb !== db) await resolvedFineDb.query('SELECT 1');
   } catch (error) { await app.close(); throw error; }
+  fineDirectoryStore?.start();
   return app;
 }
 

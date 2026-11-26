@@ -70,12 +70,15 @@ FINE_IDENTITY_CACHE_TTL_SECONDS=60
 FINE_ROLES_CACHE_TTL_SECONDS=60
 PORTAL_THEMATIC_CACHE_TTL_SECONDS=60
 PORTAL_CATALOG_CACHE_TTL_SECONDS=60
+FINEDB_DIRECTORY_CACHE_TTL_SECONDS=300
+FINEDB_DIRECTORY_REFRESH_INTERVAL_SECONDS=240
 ```
 
 - `FINE_IDENTITY_CACHE_TTL_SECONDS`：`trusted-cookie` 按 token 和用户 Cookie 缓存 FineDB 账号，`session` 按 token 缓存会话身份。并发请求会合并，设为 `0` 可关闭身份缓存。
 - `FINE_ROLES_CACHE_TTL_SECONDS`：按会话缓存 `/v10/roles` 分页与搜索结果，同时 `/notices`、`/search-history` 和 `/role-thematic/*` 按需跳过 `/v10/view/entry/tree` 拉取。
 - `PORTAL_THEMATIC_CACHE_TTL_SECONDS`：按 `role_id` 跨用户共享缓存角色专题目录树，管理员点击“保存”时立即失效对应角色缓存；用户可见报表仍按当前会话权限实时交集过滤。
-- `PORTAL_CATALOG_CACHE_TTL_SECONDS`：跨用户共享缓存 T+1 公共字典元数据、目录元数据、快捷入口及日志截止日（不含任何个人权限或个人访问记录），设为 `0` 可关闭。
+- `PORTAL_CATALOG_CACHE_TTL_SECONDS`：跨用户共享缓存公共字典元数据、目录元数据、快捷入口及日志截止日（不含任何个人权限或个人访问记录），设为 `0` 可关闭。
+- `FINEDB_DIRECTORY_CACHE_TTL_SECONDS` / `FINEDB_DIRECTORY_REFRESH_INTERVAL_SECONDS`：报表字典所依赖的 FineDB 实时目录（`fine_authority_object`）内存快照 TTL（默认 `300` 秒）与后台定时刷新周期（默认 `240` 秒，提前于 TTL 过期预刷新）；支持 Single-Flight 并发合并与刷新失败保留旧快照，可在 `conf/portal.env` 中按服务器规模灵活调优，设为 `0` 关闭对应缓存/定时器。
 
 每个门户节点独立缓存。同一登录 token 的并发 tree 请求合并为一次调用，成功后最多保留 60 秒；缓存命中不会延长有效期。到期自动清理，下次访问重新获取；刷新失败不使用过期权限。账号状态在身份缓存到期后重新查询，收藏接口逐次调用平台。
 

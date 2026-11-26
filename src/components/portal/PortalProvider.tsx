@@ -104,7 +104,7 @@ function PortalSessionProvider({ children }: { children: ReactNode }) {
 export function FavoriteButton({ entry }: { entry: Entry }) {
   const { favorites, pending, toggleFavorite } = usePortal();
   const active = favorites.includes(entry.id);
-  return <button className={`icon-button favorite ${active ? 'is-favorite' : ''}`} aria-label={`${active ? '取消收藏' : '收藏'}${entry.name}`} aria-pressed={active} disabled={pending.includes(entry.id) || ('permission' in entry && entry.permission === 'denied')} onClick={() => toggleFavorite(entry)}><Star size={17} fill={active ? 'currentColor' : 'none'} /></button>;
+  return <button className={`icon-button favorite ${active ? 'is-favorite' : ''}`} aria-label={`${active ? '取消收藏' : '收藏'}${entry.name}`} aria-pressed={active} disabled={pending.includes(entry.id) || ('status' in entry && entry.status === 'archived') || ('permission' in entry && entry.permission === 'denied')} onClick={() => toggleFavorite(entry)}><Star size={17} fill={active ? 'currentColor' : 'none'} /></button>;
 }
 export function SectionTitle({ children }: { children: ReactNode }) {
   return <h2 className="section-title"><img src="/portal/assets/图标装饰@2x.png" alt="" />{children}</h2>;

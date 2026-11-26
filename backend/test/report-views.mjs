@@ -16,6 +16,7 @@ const db = {
             report_id: 'rep-high', dictionary_id: 'd-1',
             catalog_name: '高频报表', report_type: 'bi', total_views: '1500',
             dictionary_name: '高频报表', report_description: '说明1', business_domain: '供应链',
+            tags: '核心经营, 重点看板',
             business_group: '集团', belonging_department: '供应部', suggested_owner_name: '张三',
             developer_name: '李四', update_cycle: 'T+1', online_on: '2026-01-01',
             usage_scenario: '例会', core_metrics: '销售额', metrics_calc_logic: '', data_source: 'ERP',
@@ -24,6 +25,7 @@ const db = {
             report_id: 'rep-mid', dictionary_id: 'd-2',
             catalog_name: '中频报表', report_type: 'cpt', total_views: 320,
             dictionary_name: '中频报表', report_description: '说明2', business_domain: '财务',
+            tags: '月报、预算分析',
             business_group: '集团', belonging_department: '财务部', suggested_owner_name: '王五',
             developer_name: '赵六', update_cycle: 'T+1', online_on: null,
             usage_scenario: '', core_metrics: '毛利率', metrics_calc_logic: '', data_source: 'ERP',
@@ -32,6 +34,7 @@ const db = {
             report_id: 'rep-null', dictionary_id: 'd-3',
             catalog_name: null, report_type: null, total_views: null,
             dictionary_name: '低频未同步报表', report_description: '', business_domain: '运营',
+            tags: null,
             business_group: '集团', belonging_department: '运营部', suggested_owner_name: '',
             developer_name: '', update_cycle: '周更新', online_on: null,
             usage_scenario: '', core_metrics: '', metrics_calc_logic: '', data_source: '',
@@ -47,6 +50,7 @@ const db = {
             report_id: 'rep-high',
             catalog_name: '高频报表', report_type: 'bi', total_views: '1500',
             dictionary_name: '高频报表', report_description: '说明1', business_domain: '供应链',
+            tags: '核心经营, 重点看板',
             business_group: '集团', belonging_department: '供应部', suggested_owner_name: '张三',
             developer_name: '李四', update_cycle: 'T+1', online_on: '2026-01-01',
             usage_scenario: '例会', core_metrics: '销售额', metrics_calc_logic: '', data_source: 'ERP',
@@ -55,6 +59,7 @@ const db = {
             report_id: 'rep-mid',
             catalog_name: '中频报表', report_type: 'cpt', total_views: 320,
             dictionary_name: '中频报表', report_description: '说明2', business_domain: '财务',
+            tags: '月报、预算分析',
             business_group: '集团', belonging_department: '财务部', suggested_owner_name: '王五',
             developer_name: '赵六', update_cycle: 'T+1', online_on: null,
             usage_scenario: '', core_metrics: '毛利率', metrics_calc_logic: '', data_source: 'ERP',
@@ -106,7 +111,7 @@ const platform = {
 };
 
 process.env.PUBLIC_ORIGIN = 'https://portal.example';
-const app = await buildApp({ platform, db });
+const app = await buildApp({ platform, db, fineDb: null });
 try {
   // 1. Dictionary /reports reads report_total_views, never touches dim_bi_visit_log, and caches metadata across users/filters
   queries.length = 0;
@@ -134,13 +139,30 @@ try {
   activeIds = new Set(['rep-high', 'rep-mid']);
   assert.equal(queries.length, 0, 'Cached dictionary metadata serves filters and different users with 0 SQL');
 
-  // 2. Search skips dim_bi_visit_log and populates shared catalog-rows cache
+  // 2. Search skips dim_bi_visit_log, populates shared catalog-rows cache, and searches tags from dim_bi_report_dictionary.tags (not business_domain)
   queries.length = 0;
   const searched = await app.inject('/portal/api/portal/v1/search?category=all&q=' + encodeURIComponent('高频'));
   assert.equal(searched.statusCode, 200, searched.body);
   assert.equal(searched.json().data.items[0].report.views, 1500);
   assert.equal(queries.length, 1);
+  assert(queries[0].sql.includes('d.tags'), 'Catalog query must select d.tags');
   assert(queries.every(q => !q.sql.includes('dim_bi_visit_log')), 'Search must execute zero visit_log queries');
+
+  const tagHit = await app.inject('/portal/api/portal/v1/search?category=tag&q=' + encodeURIComponent('重点看板'));
+  assert.equal(tagHit.statusCode, 200, tagHit.body);
+  assert.deepEqual(tagHit.json().data.items.map(i => i.value), ['重点看板']);
+
+  const domainNotTag = await app.inject('/portal/api/portal/v1/search?category=tag&q=' + encodeURIComponent('供应链'));
+  assert.equal(domainNotTag.statusCode, 200, domainNotTag.body);
+  assert.equal(domainNotTag.json().data.items.length, 0, 'Tag search must use d.tags instead of business_domain');
+
+  const dictByTag = await app.inject('/portal/api/portal/v1/reports?category=tag&q=' + encodeURIComponent('预算分析'));
+  assert.equal(dictByTag.statusCode, 200, dictByTag.body);
+  assert.deepEqual(dictByTag.json().data.items.map(r => r.id), ['rep-mid']);
+
+  const dictByDomainOnTag = await app.inject('/portal/api/portal/v1/reports?category=tag&q=' + encodeURIComponent('供应链'));
+  assert.equal(dictByDomainOnTag.statusCode, 200, dictByDomainOnTag.body);
+  assert.equal(dictByDomainOnTag.json().data.items.length, 0);
 
   // 3. Workbench snapshot reuses cached catalog-rows + queries only current user visits
   queries.length = 0;

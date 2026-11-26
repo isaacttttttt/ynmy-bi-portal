@@ -126,7 +126,7 @@ export default function WorkbenchModule() {
           <h3>{report.name}</h3>
           <p>{descriptionText(report)}</p>
         </button>
-        <div className="card-foot"><span>{tab === 'frequent' ? <ChartNoAxesCombined size={13} /> : <Clock size={13} />}{tab === 'frequent' ? '近30天访问' : '最近访问'}</span><strong>{tab === 'frequent' ? `${report.visits30d} 次` : report.lastVisitedOn || '暂无记录'}</strong></div>
+        <div className="card-foot"><span>{tab === 'frequent' ? <ChartNoAxesCombined size={13} /> : <Clock size={13} />}{tab === 'frequent' ? '近30天访问' : '最近访问'}</span><strong className={tab === 'frequent' ? 'visit-count-inline' : undefined}>{tab === 'frequent' ? <><img className="flame-icon" src="/portal/assets/icon-flame.png" alt="" aria-hidden="true" />{`${report.visits30d} 次`}</> : report.lastVisitedOn || '暂无记录'}</strong></div>
       </article>
     ))}</div> : <RequestState {...result} />}</div>
     {preview && typeof document !== 'undefined' && createPortal(
