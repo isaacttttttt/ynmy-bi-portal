@@ -148,8 +148,8 @@ button { border:0; background:none; color:inherit; }
 .breadcrumbs span { display:flex; align-items:center; gap:5px; }
 .breadcrumbs button { padding:2px 4px; }
 .breadcrumbs [aria-current] { color:var(--portal-blue); }
-.topic-card { position:relative; min-width:0; background:var(--card-bg); border:1px solid var(--card-line); border-radius:var(--card-radius); overflow:hidden; background-size:cover; background-position:left center; background-repeat:no-repeat; }
-.topic-main { width:100%; min-height:clamp(84px,9.5dvh,114px); display:flex; align-items:center; text-align:left; gap:12px; padding:clamp(10px,1.4dvh,16px) 28px clamp(10px,1.4dvh,16px) clamp(76px,6vw,104px); }
+.topic-card { --topic-h:clamp(84px,9.5dvh,114px); container-type:inline-size; position:relative; min-width:0; background:var(--card-bg); border:1px solid var(--card-line); border-radius:var(--card-radius); overflow:hidden; background-size:cover; background-position:left center; background-repeat:no-repeat; }
+.topic-main { width:100%; min-height:var(--topic-h); display:flex; align-items:center; text-align:left; gap:12px; padding:clamp(10px,1.4dvh,16px) 36px clamp(10px,1.4dvh,16px) max(calc(22.5cqi + 16px),calc(var(--topic-h) * .84 + 16px)); }
 .topic-main > div { min-width:0; flex:1; }
 .topic-main .entry-icon,.topic-main .folder-icon { display:none; }
 .topic-main h3 { font-size:clamp(14px,1vw,18px); line-height:1.4; font-weight:600; margin:0 0 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
