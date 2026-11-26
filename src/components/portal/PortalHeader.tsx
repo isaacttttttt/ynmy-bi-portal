@@ -8,7 +8,7 @@ import PortalSearch from './PortalSearch';
 export default function PortalHeader({ dictionary = false, query = '', category, onSearch, view, onViewChange }: { dictionary?: boolean; query?: string; category?: SearchCategory; onSearch: (q: string, category: SearchCategory) => void; view?: 'grid' | 'list'; onViewChange?: (view: 'grid' | 'list') => void }) {
   return <header className="portal-header">
     <div className="brand-row">
-      <Link href="/" className="brand-logo" aria-label="云南白药数据门户首页"><img src="/portal/assets/company_title.png" alt="云南白药 YUNNANBAIYAO" /></Link>
+      <Link href="/" className="brand-logo" aria-label="云南白药数据门户首页"><img src="/portal/assets/yunnan_baiyao.svg" alt="云南白药 YUNNAN BAIYAO" /></Link>
       <div className="brand-copy"><h1>{dictionary ? '数据门户 · 报表字典' : '云南白药集团 · 数据门户'}</h1>{!dictionary && <p>数据驱动经营 · 智慧赋能决策</p>}</div>
       <div className="header-tools"><div className="header-help"><span className="environment-label">企业数据门户</span><PortalGuide dictionary={dictionary} /></div>
         {dictionary && <Link href="/" className="home-link"><ArrowLeft size={17} strokeWidth={2.3} />返回首页</Link>}

@@ -24,7 +24,7 @@ button { border:0; background:none; color:inherit; }
 .portal-header { flex-shrink:0; display:flex; flex-direction:column; gap:clamp(10px,1.6dvh,22px); padding:clamp(12px,1.8dvh,28px) 4px clamp(12px,2dvh,26px); }
 .brand-row { display:flex; align-items:center; gap:clamp(16px,1.6vw,28px); min-width:0; }
 .brand-logo { display:flex; align-items:center; flex-shrink:0; }
-.brand-logo img { height:clamp(36px,4.8dvh,64px); width:auto; max-width:clamp(140px,14vw,260px); display:block; object-fit:contain; }
+.brand-logo img { height:60px; width:auto; aspect-ratio:456 / 190; max-width:none; flex-shrink:0; display:block; }
 .brand-copy { border-left:1px solid #b8d5f5; padding-left:clamp(16px,1.6vw,28px); min-width:0; }
 .brand-copy h1 { font-size:clamp(20px,1.65vw,34px); font-weight:700; letter-spacing:clamp(1px,.12vw,2px); line-height:1.25; margin:0; color:#080d14; white-space:nowrap; }
 .brand-copy p { color:#6b85a7; letter-spacing:clamp(3px,.4vw,7px); font-size:clamp(12px,.82vw,15px); margin:3px 0 0; white-space:nowrap; }
@@ -394,7 +394,7 @@ legend { margin-bottom:10px; font-size:14px; font-weight:600; color:#617fa6; }
 .role-config-page { width:100%; max-width:2560px; height:max(100dvh,680px); margin:0 auto; padding:16px var(--page-pad); display:flex; flex-direction:column; gap:14px; min-width:960px; overflow:hidden; }
 .role-config-topbar { display:flex; align-items:center; justify-content:space-between; padding:2px 6px; flex-shrink:0; }
 .role-config-brand { display:flex; align-items:center; gap:20px; }
-.role-config-logo { height:32px; width:auto; display:block; }
+.role-config-logo { height:44px; width:auto; aspect-ratio:456 / 190; max-width:none; flex-shrink:0; display:block; }
 .role-config-title-group { border-left:1px solid #b8d5f5; padding-left:20px; }
 .role-config-title-group h1 { margin:0; font-size:20px; font-weight:700; color:#0b1726; letter-spacing:1px; line-height:1.3; }
 .role-config-title-group p { margin:2px 0 0; font-size:12px; color:#5e7a9c; }

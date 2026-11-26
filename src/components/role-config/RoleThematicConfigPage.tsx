@@ -722,7 +722,7 @@ export default function RoleThematicConfigPage() {
 
       <header className="role-config-topbar">
         <div className="role-config-brand">
-          <img src="/portal/assets/company_title.png" alt="云南白药" className="role-config-logo" />
+          <img src="/portal/assets/yunnan_baiyao.svg" alt="云南白药" className="role-config-logo" />
           <div className="role-config-title-group">
             <h1>专题分析 · 目录配置</h1>
             <p>为角色定制门户首页专题分析板块的目录结构、报表归属与排序</p>

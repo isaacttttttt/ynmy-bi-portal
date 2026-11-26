@@ -8,7 +8,7 @@ export const ASSETS_MAP = {
   pageBackground: "/portal/assets/页面背景@2x.png",
 
   // Logo与品牌
-  companyLogo: "/portal/assets/company_title.png",
+  companyLogo: "/portal/assets/yunnan_baiyao.svg",
   companyTitle: "/portal/assets/title.png",
 
   // 收藏星标

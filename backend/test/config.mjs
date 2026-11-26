@@ -54,6 +54,7 @@ try {
     ['/portal/', 'private, no-store'],
     ['/portal/report-dictionary/', 'private, no-store'],
     ['/portal/assets/company_title.png', 'public, max-age=3600'],
+    ['/portal/assets/yunnan_baiyao.svg', 'public, max-age=3600'],
     [`/portal/_next/static/chunks/${chunk}`, 'public, max-age=31536000, immutable'],
   ]) {
     const resource = await app.inject(url);
