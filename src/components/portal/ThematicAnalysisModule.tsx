@@ -32,7 +32,7 @@ export default function ThematicAnalysisModule() {
 
   return <section className="panel thematic">
     <div className="section-heading"><SectionTitle>专题分析</SectionTitle>
-      {activeRole && <Dropdown trigger={['click']} overlayClassName="topic-dropdown" getPopupContainer={() => document.body} menu={roleMenu}>
+      {activeRole && roles.length > 1 && <Dropdown trigger={['click']} overlayClassName="topic-dropdown" getPopupContainer={() => document.body} menu={roleMenu}>
         <button className="group-select" aria-label="选择角色" aria-haspopup="menu">{activeRole.name}<ChevronDown size={14} /></button>
       </Dropdown>}
     </div>

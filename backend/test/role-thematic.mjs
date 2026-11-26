@@ -349,6 +349,7 @@ try {
   const p1Data = page1.json().data;
   assert.equal(p1Data.items.length, 15);
   assert.equal(p1Data.hasNext, true);
+  assert.equal(p1Data.total, 18, 'Role list resolves exact total even when upstream omits total');
   assert.equal(p1Data.items[0].name, '供应链分析角色');
   const rolesCallsBeforeRepeat = roleRequests.length;
   const page1Cached = await app.inject({ url: '/portal/api/portal/v1/role-thematic/roles?page=1&pageSize=15', headers: { cookie } });

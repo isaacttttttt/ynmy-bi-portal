@@ -118,29 +118,38 @@ export function Pagination({
   onChange,
   disabled = false,
   compact = false,
+  hideJumpButton = compact,
 }: {
   data: { page: number; pageSize: number; total?: number; hasNext?: boolean };
   onChange: (page: number) => void;
   disabled?: boolean;
   compact?: boolean;
+  hideJumpButton?: boolean;
 }) {
   const hasTotal = typeof data.total === 'number' && Number.isFinite(data.total);
   const pages = hasTotal ? Math.max(1, Math.ceil(data.total! / data.pageSize)) : null;
   const canPrev = !disabled && data.page > 1;
   const canNext = !disabled && (pages !== null ? data.page < pages : Boolean(data.hasNext));
   const [jumpInput, setJumpInput] = useState(String(data.page));
-  useEffect(() => { setJumpInput(String(data.page)); }, [data.page]);
+  const submittedRef = useRef<number | null>(null);
+  useEffect(() => {
+    setJumpInput(String(data.page));
+    submittedRef.current = null;
+  }, [data.page]);
 
   function submitJump() {
     if (disabled) return;
     const parsed = Number.parseInt(jumpInput.trim(), 10);
     if (!Number.isFinite(parsed) || parsed < 1) {
       setJumpInput(String(data.page));
+      submittedRef.current = null;
       return;
     }
     const target = pages !== null ? Math.min(pages, Math.max(1, parsed)) : Math.max(1, parsed);
     setJumpInput(String(target));
-    if (target !== data.page) onChange(target);
+    if (target === data.page || submittedRef.current === target) return;
+    submittedRef.current = target;
+    onChange(target);
   }
 
   return (
@@ -150,7 +159,7 @@ export function Pagination({
         <button type="button" className="icon-button pagination-btn" aria-label="上一页" disabled={!canPrev} onClick={() => onChange(data.page - 1)}>
           <ChevronLeft size={18} strokeWidth={2.4} />
         </button>
-        <span className="pagination-page">{pages !== null ? `${data.page} / ${pages}` : `第 ${data.page} 页`}</span>
+        <span className="pagination-page">{pages !== null ? `${data.page} / ${pages}` : `${data.page} / ${data.hasNext ? `${data.page + 1}+` : data.page}`}</span>
         <button type="button" className="icon-button pagination-btn" aria-label="下一页" disabled={!canNext} onClick={() => onChange(data.page + 1)}>
           <ChevronRight size={18} strokeWidth={2.4} />
         </button>
@@ -171,13 +180,22 @@ export function Pagination({
           aria-label="跳转页码"
           disabled={disabled}
           value={jumpInput}
-          onFocus={event => event.currentTarget.select()}
-          onChange={event => setJumpInput(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+          onFocus={event => {
+            submittedRef.current = null;
+            event.currentTarget.select();
+          }}
+          onBlur={() => submitJump()}
+          onChange={event => {
+            submittedRef.current = null;
+            setJumpInput(event.target.value.replace(/[^\d]/g, '').slice(0, 6));
+          }}
         />
         <span>页</span>
-        <button type="submit" className="pagination-jump-btn" disabled={disabled}>
-          跳转
-        </button>
+        {!hideJumpButton && (
+          <button type="submit" className="pagination-jump-btn" disabled={disabled}>
+            跳转
+          </button>
+        )}
       </form>
     </nav>
   );

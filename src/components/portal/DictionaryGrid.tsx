@@ -36,7 +36,7 @@ export default function DictionaryGrid({ result, onPage, query, onReset, view }:
             )}
           </h3>
           <p className={isUnregistered && !report.description ? 'unregistered-hint' : undefined}>
-            {report.description ? highlight(report.description) : isUnregistered ? '该报表已挂载至目录，暂未在数据字典中登记' : '暂未维护报表简介'}
+            {report.description ? highlight(report.description) : isUnregistered ? '该报表已挂载至目录，暂未在报表字典中登记' : '暂未维护报表简介'}
           </p>
         </button>
         <div className="metadata-row">
@@ -44,7 +44,7 @@ export default function DictionaryGrid({ result, onPage, query, onReset, view }:
           <span><Clock3 size={13} /><span>{report.frequency ? highlight(report.frequency) : emptyMeta}</span></span>
           <span><UserRound size={13} /><span>{report.owner ? highlight(report.owner) : emptyMeta}</span></span>
         </div>
-        <div className="source-row"><Database size={13} /><span>数据源</span><strong>{report.source ? highlight(report.source) : (isUnregistered ? '暂未登记数据字典' : '暂未维护')}</strong></div>
+        <div className="source-row"><Database size={13} /><span>数据源</span><strong>{report.source ? highlight(report.source) : (isUnregistered ? '暂未登记报表字典' : '暂未维护')}</strong></div>
         <div className="metric-tags">{report.metrics.map(metric => <span key={metric}>{highlight(metric)}</span>)}</div>
       </>;
       return <article key={report.metadataId} className={`dictionary-card ${toneClass}`}>

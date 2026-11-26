@@ -209,31 +209,61 @@ export function platformClient(env = process.env, fineDb) {
     return entry.map.get(roleId) || null;
   }
 
+  async function fetchRolesRaw(token, { page = 1, count = 15, keyword = '' } = {}, log) {
+    const sep = paths.roles.includes('?') ? '&' : '?';
+    const qs = `page=${page}&keyword=${encodeURIComponent(keyword)}&count=${count}&privilegeType=${rolesPrivilegeType}&_=${Date.now()}`;
+    const data = await call(token, `${paths.roles}${sep}${qs}`, 'GET', log, 'roles');
+    if (!data || !Array.isArray(data.items) || data.items.length > 500) throw upstreamError();
+    const items = data.items.map(row => {
+      if (!row || !validId(row.id) || typeof row.text !== 'string') throw upstreamError();
+      return { id: row.id, name: row.text, description: typeof row.description === 'string' ? row.description : '' };
+    });
+    rememberRoles(token, items);
+    const total = Number.isInteger(data.total) && data.total >= 0
+      ? data.total
+      : Number.isInteger(data.totalCount) && data.totalCount >= 0
+        ? data.totalCount
+        : undefined;
+    return {
+      page: Number.isInteger(data.page) && data.page > 0 ? data.page : page,
+      pageSize: count,
+      hasNext: Boolean(data.hasNext),
+      ...(total !== undefined ? { total } : {}),
+      items,
+    };
+  }
+
+  async function resolveRoleTotal(token, tokenHash, keyword, firstPage, log) {
+    if (firstPage.total !== undefined) return firstPage.total;
+    if (!firstPage.hasNext) return (firstPage.page - 1) * firstPage.pageSize + firstPage.items.length;
+    const totalKey = `${tokenHash}:total:${keyword}`;
+    try {
+      return await roleListCache.getOrLoad(totalKey, async () => {
+        let sum = 0;
+        const batchSize = 200;
+        for (let batchPage = 1; batchPage <= 25; batchPage++) {
+          const batch = await fetchRolesRaw(token, { page: batchPage, count: batchSize, keyword }, log);
+          if (batch.total !== undefined) return batch.total;
+          sum += batch.items.length;
+          if (!batch.hasNext || !batch.items.length) return sum;
+        }
+        return undefined;
+      }, {
+        shouldStore: value => typeof value === 'number',
+        onEvent: (result, size) => log?.info({ stage: 'roles-total-cache', result, entries: size }, 'roles total cache'),
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
   async function fetchRoles(token, { page = 1, count = 15, keyword = '' } = {}, log) {
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const listKey = `${tokenHash}:${page}:${count}:${keyword}`;
     return roleListCache.getOrLoad(listKey, async () => {
-      const sep = paths.roles.includes('?') ? '&' : '?';
-      const qs = `page=${page}&keyword=${encodeURIComponent(keyword)}&count=${count}&privilegeType=${rolesPrivilegeType}&_=${Date.now()}`;
-      const data = await call(token, `${paths.roles}${sep}${qs}`, 'GET', log, 'roles');
-      if (!data || !Array.isArray(data.items) || data.items.length > 500) throw upstreamError();
-      const items = data.items.map(row => {
-        if (!row || !validId(row.id) || typeof row.text !== 'string') throw upstreamError();
-        return { id: row.id, name: row.text, description: typeof row.description === 'string' ? row.description : '' };
-      });
-      rememberRoles(token, items);
-      const total = Number.isInteger(data.total) && data.total >= 0
-        ? data.total
-        : Number.isInteger(data.totalCount) && data.totalCount >= 0
-          ? data.totalCount
-          : undefined;
-      return {
-        page: Number.isInteger(data.page) && data.page > 0 ? data.page : page,
-        pageSize: count,
-        hasNext: Boolean(data.hasNext),
-        ...(total !== undefined ? { total } : {}),
-        items,
-      };
+      const result = await fetchRolesRaw(token, { page, count, keyword }, log);
+      const total = await resolveRoleTotal(token, tokenHash, keyword, result, log);
+      return total !== undefined ? { ...result, total } : result;
     }, {
       onEvent: (result, size) => log?.info({ stage: 'roles-cache', result, entries: size }, 'roles cache'),
     });
