@@ -34,6 +34,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
   const thematicCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.PORTAL_THEMATIC_CACHE_TTL_SECONDS, 60, 'PORTAL_THEMATIC_CACHE_TTL_SECONDS'), maxEntries: 2000 });
   const catalogCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.PORTAL_CATALOG_CACHE_TTL_SECONDS, 60, 'PORTAL_CATALOG_CACHE_TTL_SECONDS'), maxEntries: 32 });
   const userRolesCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.FINEDB_USER_ROLES_CACHE_TTL_SECONDS, 30, 'FINEDB_USER_ROLES_CACHE_TTL_SECONDS'), maxEntries: 5000 });
+  const userDeptsCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.FINEDB_USER_ROLES_CACHE_TTL_SECONDS, 30, 'FINEDB_USER_ROLES_CACHE_TTL_SECONDS'), maxEntries: 5000 });
   const fineObjectTreeCache = createTtlCache({ ttlMs: cacheTtlMs(process.env.FINEDB_OBJECT_TREE_CACHE_TTL_SECONDS, 30, 'FINEDB_OBJECT_TREE_CACHE_TTL_SECONDS'), maxEntries: 4 });
   const fineDirectoryTtlMs = cacheTtlMs(process.env.FINEDB_DIRECTORY_CACHE_TTL_SECONDS, 300, 'FINEDB_DIRECTORY_CACHE_TTL_SECONDS');
   const rawRefreshInterval = process.env.FINEDB_DIRECTORY_REFRESH_INTERVAL_SECONDS?.trim();
@@ -58,6 +59,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
     thematicCache.clear();
     catalogCache.clear();
     userRolesCache.clear();
+    userDeptsCache.clear();
     fineObjectTreeCache.clear();
     await Promise.all([
       db.end(),
@@ -118,7 +120,7 @@ export async function buildApp({ platform, db = createPool(), fineDb } = {}) {
     });
     api.get('/reports', async request => {
       const query = pageQuery(request.query, { reports: true });
-      return { success: true, data: queryReports(await reportsFor(db, request.portal, true, { fineDb: resolvedFineDb, directoryStore: fineDirectoryStore, cache: catalogCache }), query) };
+      return { success: true, data: queryReports(await reportsFor(db, request.portal, true, { fineDb: resolvedFineDb, directoryStore: fineDirectoryStore, cache: catalogCache, userDeptsCache }), query) };
     });
     api.get('/workbench', async request => {
       const query = pageQuery(request.query, { workbench: true, defaultSize: 8 });

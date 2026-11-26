@@ -359,22 +359,107 @@ function dictionarySortRank(report) {
   return report.registered === false ? 1 : 0;
 }
 
-export async function reportsFor(db, context, dictionary = false, { includeUserVisits = !dictionary, cache, fineDb = null, directoryStore = null, env = process.env } = {}) {
+export function parseBusinessGroups(value) {
+  if (typeof value !== 'string') return [];
+  return [...new Set(value.split(/[,，]+/).map(item => item.trim()).filter(Boolean))];
+}
+
+export function canViewDictionaryReport(report, allowedDeptNames) {
+  if (report.permission === 'granted') return true;
+  if (!allowedDeptNames || !allowedDeptNames.size) return false;
+  if (report.registered === false) return false;
+  return parseBusinessGroups(report.businessGroup).some(group => allowedDeptNames.has(group));
+}
+
+export async function userDeptNamesFor(db, context, { fineDb = null, env = process.env, cache = null } = {}) {
+  if (!context?.user) return null;
+  const userName = context.user.userName || '';
+  const fineUserIds = Array.isArray(context.user.fineUserIds) ? [...context.user.fineUserIds].sort() : null;
+  const oaDeptCodes = Array.isArray(context.user.oaDeptCodes) ? [...context.user.oaDeptCodes].sort() : null;
+  if (!userName && !oaDeptCodes) return null;
+
+  const load = async () => {
+    let rows;
+    if (oaDeptCodes) {
+      if (!oaDeptCodes.length) return new Set();
+      ({ rows } = await db.query(
+        `/* portal: user mapped departments */
+         SELECT DISTINCT trim(m.dept_name) AS dept_name
+         FROM dim_dept_mapping m
+         WHERE trim(m.dept_job_id) = ANY($1::text[])
+           AND m.dept_name IS NOT NULL AND trim(m.dept_name) <> ''`,
+        [oaDeptCodes],
+      ));
+    } else {
+      let fineDeptIds = [];
+      if (fineDb) {
+        try {
+          fineDeptIds = await userDeptJobIds(fineDb, context, { env });
+        } catch (error) {
+          if (!FINEDB_FALLBACK_CODES.has(error.code)) throw error;
+          context.log?.warn({ stage: 'dictionary-departments', code: error.code, reason: error.message }, 'finedb user departments unavailable, falling back to dim_bi_user');
+        }
+      }
+      if (fineDeptIds.length) {
+        ({ rows } = await db.query(
+          `/* portal: user mapped departments */
+           SELECT DISTINCT dept_name FROM (
+             SELECT trim(m.dept_name) AS dept_name
+             FROM dim_dept_mapping m
+             WHERE trim(m.dept_job_id) = ANY($3::text[])
+             UNION
+             SELECT trim(m.dept_name) AS dept_name
+             FROM dim_bi_user u INNER JOIN dim_dept_mapping m ON trim(u.oa_dept_code) = trim(m.dept_job_id)
+             WHERE u.username = $1 AND u.enable = 'true'
+               AND ($2::text[] IS NULL OR u.id::text = ANY($2::text[]))
+           ) departments
+           WHERE dept_name IS NOT NULL AND dept_name <> ''`,
+          [userName, fineUserIds, fineDeptIds],
+        ));
+      } else {
+        ({ rows } = await db.query(
+          `/* portal: user mapped departments */
+           SELECT DISTINCT trim(m.dept_name) AS dept_name
+           FROM dim_bi_user u INNER JOIN dim_dept_mapping m ON trim(u.oa_dept_code) = trim(m.dept_job_id)
+           WHERE u.username = $1 AND u.enable = 'true'
+             AND ($2::text[] IS NULL OR u.id::text = ANY($2::text[]))
+             AND m.dept_name IS NOT NULL AND trim(m.dept_name) <> ''`,
+          [userName, fineUserIds],
+        ));
+      }
+    }
+    return new Set(rows.map(row => (typeof row.dept_name === 'string' ? row.dept_name.trim() : '')).filter(Boolean));
+  };
+
+  if (!cache) return load();
+  const key = `${userName}|${fineUserIds ? fineUserIds.join(',') : ''}|${oaDeptCodes ? oaDeptCodes.join(',') : ''}`;
+  return cache.getOrLoad(key, load, {
+    onEvent: (result, size) => context.log?.info({ stage: 'user-depts-cache', result, entries: size }, 'user depts cache'),
+  });
+}
+
+export async function reportsFor(db, context, dictionary = false, { includeUserVisits = !dictionary, cache, fineDb = null, directoryStore = null, userDeptsCache = null, env = process.env } = {}) {
   if (!dictionary && !context.ids.size) return [];
   const entries = context.entryMap ?? new Map(context.entries.map(entry => [entry.id, entry]));
 
   if (dictionary) {
-    let liveReports = null;
-    if (directoryStore || fineDb) {
-      try {
-        liveReports = directoryStore
-          ? await directoryStore.get({ log: context.log })
-          : await loadLiveFineDbReports(fineDb, { env });
-      } catch (error) {
-        if (!FINEDB_FALLBACK_CODES.has(error.code)) throw error;
-        context.log?.warn({ stage: 'dictionary-finedb', code: error.code, reason: error.message }, 'finedb fine_authority_object unavailable, falling back to dim_bi_report_dictionary');
-      }
-    }
+    const [liveReports, allowedDeptNames] = await Promise.all([
+      (async () => {
+        if (!directoryStore && !fineDb) return null;
+        try {
+          return directoryStore
+            ? await directoryStore.get({ log: context.log })
+            : await loadLiveFineDbReports(fineDb, { env });
+        } catch (error) {
+          if (!FINEDB_FALLBACK_CODES.has(error.code)) throw error;
+          context.log?.warn({ stage: 'dictionary-finedb', code: error.code, reason: error.message }, 'finedb fine_authority_object unavailable, falling back to dim_bi_report_dictionary');
+          return null;
+        }
+      })(),
+      userDeptNamesFor(db, context, { fineDb, env, cache: userDeptsCache }),
+    ]);
+
+    const applyOrgVisibility = list => (allowedDeptNames ? list.filter(report => canViewDictionaryReport(report, allowedDeptNames)) : list);
 
     if (liveReports) {
       const [dictRows, infoByReportId] = await Promise.all([
@@ -434,7 +519,7 @@ export async function reportsFor(db, context, dictionary = false, { includeUserV
         ));
       }
 
-      return merged.sort((a, b) =>
+      return applyOrgVisibility(merged).sort((a, b) =>
         dictionarySortRank(a) - dictionarySortRank(b)
         || a.name.localeCompare(b.name, 'zh-CN')
         || a.id.localeCompare(b.id),
@@ -442,9 +527,11 @@ export async function reportsFor(db, context, dictionary = false, { includeUserV
     }
 
     const rows = await loadDictionaryRows(db, cache, context.log);
-    return rows
-      .filter(row => entries.get(row.report_id)?.type !== 'folder')
-      .map(row => mapReportRow(row, context, entries));
+    return applyOrgVisibility(
+      rows
+        .filter(row => entries.get(row.report_id)?.type !== 'folder')
+        .map(row => mapReportRow(row, context, entries)),
+    );
   }
 
   const catalogRows = (await loadCatalogRows(db, cache, context.log))

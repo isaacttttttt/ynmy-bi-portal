@@ -76,6 +76,10 @@ const db = {
         ],
       };
     }
+    if (sql.includes('/* portal: user mapped departments */')) {
+      assert.deepEqual(params[0], ['DEPT-001']);
+      return { rows: [{ dept_name: '集团' }] };
+    }
     if (sql.includes('FROM fr_index_noticement')) {
       assert(!sql.includes('dim_bi_user'), 'Notices query skips dim_bi_user when oaDeptCodes is preloaded on context.user');
       assert.deepEqual(params[0], ['DEPT-001']);
@@ -122,7 +126,7 @@ try {
   assert.equal(allData.items.find(r => r.id === 'rep-high').views, 1500);
   assert.equal(allData.items.find(r => r.id === 'rep-mid').views, 320);
   assert.equal(allData.items.find(r => r.id === 'rep-null').views, 0);
-  assert.equal(queries.length, 1, 'First dictionary query executes 1 metadata SQL and 0 visit_log SQL');
+  assert.equal(queries.length, 2, 'First dictionary query executes 1 metadata SQL + 1 user mapped departments SQL and 0 visit_log SQL');
 
   // Subsequent filtered requests & different user permission sets reuse cached dictionary metadata (0 SQL!)
   queries.length = 0;
