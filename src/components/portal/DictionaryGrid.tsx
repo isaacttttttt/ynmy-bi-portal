@@ -48,7 +48,7 @@ export default function DictionaryGrid({ result, onPage, query, onReset, view }:
         <div className="metric-tags">{report.metrics.map(metric => <span key={metric}>{highlight(metric)}</span>)}</div>
       </>;
       return <article key={report.metadataId} className={`dictionary-card ${toneClass}`}>
-        <div className="card-top"><EntryIcon entry={report} /><span className={`status-badge ${statusKind}`}>{statusText}</span><FavoriteButton entry={report} /></div>
+        <div className="card-top"><EntryIcon entry={report} unregistered={isUnregistered} /><span className={`status-badge ${statusKind}`}>{statusText}</span><FavoriteButton entry={report} /></div>
         {view === 'grid' ? <ScrollArea label={`${report.name}的报表简介与指标`}>{content}</ScrollArea> : <div className="dictionary-body">{content}</div>}
         <div className="dictionary-actions"><button className="text-button" onClick={() => setSelected(report)}>查看详情</button><button className="open-report" disabled={isArchived || report.permission === 'denied'} onClick={() => open(report)}>{isArchived ? '已下架' : report.permission === 'denied' ? '无访问权限' : '打开报表'}<span aria-hidden="true">↗</span></button></div>
       </article>;

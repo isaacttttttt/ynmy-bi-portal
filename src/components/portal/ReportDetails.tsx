@@ -5,12 +5,12 @@ import { FolderOpen, ExternalLink } from 'lucide-react';
 import type { Entry, Report } from '@/lib/portal-model';
 import { FavoriteButton, usePortal } from './PortalProvider';
 import ScrollArea from './ScrollArea';
-export function EntryIcon({ entry }: { entry: Entry }) {
+export function EntryIcon({ entry, unregistered = false }: { entry: Entry; unregistered?: boolean }) {
   const container = useRef<HTMLSpanElement>(null);
   const [loaded, setLoaded] = useState('');
   const key = `${entry.id}:${entry.iconUrl || ''}`;
   useEffect(() => {
-    if (!entry.iconUrl || !container.current) return;
+    if (unregistered || !entry.iconUrl || !container.current) return;
     const url = entry.iconUrl;
     let cancelled = false;
     const observer = new IntersectionObserver(records => {
@@ -22,12 +22,15 @@ export function EntryIcon({ entry }: { entry: Entry }) {
     });
     observer.observe(container.current);
     return () => { cancelled = true; observer.disconnect(); };
-  }, [entry.iconUrl, key]);
+  }, [entry.iconUrl, key, unregistered]);
+  if (unregistered) {
+    return <span ref={container} className="entry-icon" aria-hidden="true"><img src="/portal/assets/icon-unregistered.png" alt="" /></span>;
+  }
   const fallback = entry.type === 'frm' ? '填报' : entry.type === 'cpt' ? '报表' : '驾驶舱';
   return <span ref={container} className={entry.type === 'folder' || entry.type === 'url' ? 'folder-icon' : 'entry-icon'} aria-hidden="true">
     {entry.iconUrl && loaded === key ? <img src={entry.iconUrl} alt="" onError={() => setLoaded('')} />
-      : entry.type === 'folder' ? <FolderOpen size={38} />
-      : entry.type === 'url' ? <ExternalLink size={30} />
+      : entry.type === 'folder' ? <FolderOpen />
+      : entry.type === 'url' ? <ExternalLink />
       : <img src={`/portal/assets/${fallback}.png`} alt="" />}
   </span>;
 }
