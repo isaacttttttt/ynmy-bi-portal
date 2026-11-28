@@ -165,7 +165,7 @@ Report 示例（卡片和详情使用同一对象，避免底表未就绪时增�
 
 - 列表：`GET /v10/favorite/entry/list`
 - 添加：`POST /v10/favorite/entry/:id`
-- 取消：`POST /v10/favorite/entry/:id?fakeMethod=DELETE`
+- 取消：`DELETE /v10/favorite/entry/:id`（请求头 `Content-Type: application/json`、`X-Requested-With: XMLHttpRequest`，请求体 `{}`）
 - 示例成功标记：响应 `data === "success"`。上线时仍须核对部署版本，不能只以 HTTP 200 判断成功。
 
 收藏也建议通过 BFF 适配平台差异；浏览器不直接读取父窗口的 `fine_auth_token`。

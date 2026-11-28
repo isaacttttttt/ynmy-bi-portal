@@ -16,6 +16,6 @@ export default function FilterSidebar({ filters, facets, loading, visitStatsUnav
       </label>)}
       {key === 'volume' && visitStatsUnavailable && <p className="filter-hint" role="status">访问统计暂不可用{filters.volume.length > 0 ? '，已暂停访问量级筛选' : ''}</p>}
       {!facets && loading && <div aria-label="加载筛选项" aria-busy="true" className="space-y-3"><Skeleton className="h-5 w-full" /><Skeleton className="h-5 w-3/4" /></div>}
-    </fieldset>)}<p className="filter-hint">同组多选取并集，不同组取交集。</p></ScrollArea>
+    </fieldset>)}<p className="filter-hint">同组多选取并集，不同组取交集</p></ScrollArea>
   </aside>;
 }

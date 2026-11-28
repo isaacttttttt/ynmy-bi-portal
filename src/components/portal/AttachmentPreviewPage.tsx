@@ -126,6 +126,7 @@ export default function AttachmentPreviewPage() {
   const [activeSheet, setActiveSheet] = useState(0);
   const [zoom, setZoom] = useState(100);
   const [docxPages, setDocxPages] = useState(0);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -137,11 +138,12 @@ export default function AttachmentPreviewPage() {
 
   useEffect(() => {
     if (!ready || params.error || !params.url) return;
-    if (params.kind === 'image' || params.kind === 'pdf' || params.kind === 'unsupported') return;
+    if (params.kind === 'image' || params.kind === 'unsupported') return;
 
     const controller = new AbortController();
     let disposed = false;
     let pptxCleanup: (() => void) | null = null;
+    let createdPdfUrl: string | null = null;
 
     async function loadDocument() {
       setLoading(true);
@@ -149,6 +151,7 @@ export default function AttachmentPreviewPage() {
       setSheets([]);
       setActiveSheet(0);
       setDocxPages(0);
+      setPdfBlobUrl(null);
       if (hostRef.current) hostRef.current.innerHTML = '';
 
       try {
@@ -159,7 +162,12 @@ export default function AttachmentPreviewPage() {
         const buffer = await response.arrayBuffer();
         if (disposed) return;
 
-        if (params.kind === 'docx') {
+        if (params.kind === 'pdf') {
+          // Wrap fetched PDF bytes in an explicit application/pdf Blob URL so browsers preview inline
+          // even when the upstream file server responds with Content-Disposition: attachment.
+          createdPdfUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+          setPdfBlobUrl(createdPdfUrl);
+        } else if (params.kind === 'docx') {
           const docx = await import('docx-preview');
           if (disposed || !hostRef.current) return;
           await docx.renderAsync(buffer, hostRef.current, undefined, {
@@ -224,6 +232,7 @@ export default function AttachmentPreviewPage() {
       disposed = true;
       controller.abort();
       pptxCleanup?.();
+      if (createdPdfUrl) URL.revokeObjectURL(createdPdfUrl);
     };
   }, [ready, params.url, params.kind, params.error]);
 
@@ -340,8 +349,8 @@ export default function AttachmentPreviewPage() {
           </div>
         )}
 
-        {!loading && !effectiveError && ready && params.kind === 'pdf' && params.url && (
-          <iframe src={params.url} title={params.name} className="attachment-pdf-frame" />
+        {!loading && !effectiveError && ready && params.kind === 'pdf' && pdfBlobUrl && (
+          <iframe src={pdfBlobUrl} title={params.name} className="attachment-pdf-frame" />
         )}
 
         {!loading && !effectiveError && params.kind === 'xlsx' && currentSheet && (

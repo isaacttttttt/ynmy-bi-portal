@@ -9,7 +9,11 @@ import { loadWorkbench, openPlatformEntry, PortalRequestError, request } from '@
 import type { Bootstrap, Entry, Page, Report, WorkbenchData } from '@/lib/portal-model';
 
 const REFRESH_MS = 10 * 60 * 1000;
-export function usePortalRequest<T>(path: string, fetcher: (path: string, signal?: AbortSignal) => Promise<T> = request) {
+export function usePortalRequest<T>(
+  path: string,
+  fetcher: (path: string, signal?: AbortSignal) => Promise<T> = request,
+  { staleTimeMs = REFRESH_MS }: { staleTimeMs?: number } = {},
+) {
   const [attempt, setAttempt] = useState(0);
   const key = `${path}|${attempt}`;
   const [state, setState] = useState<{ key: string; data?: T; error?: string }>({ key: '' });
@@ -36,10 +40,11 @@ export function usePortalRequest<T>(path: string, fetcher: (path: string, signal
       }
     }
     const cached = cache.current.get(path);
-    if (cached && !attempt) timer = setTimeout(refresh, Math.max(0, REFRESH_MS - (Date.now() - cached.fetchedAt)));
+    const isFresh = Boolean(cached && !attempt && staleTimeMs > 0 && (Date.now() - cached.fetchedAt) < staleTimeMs);
+    if (isFresh) timer = setTimeout(refresh, Math.max(0, staleTimeMs - (Date.now() - cached!.fetchedAt)));
     else void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [key, path, attempt, fetcher]);
+  }, [key, path, attempt, fetcher, staleTimeMs]);
   const data = cache.current.get(path)?.data;
   const error = state.key === key ? state.error : undefined;
   function mutate(update: (data: T) => T) {
@@ -111,7 +116,7 @@ export function SectionTitle({ children }: { children: ReactNode }) {
 }
 export function RequestState({ loading, error, retry }: { loading?: boolean; error?: string; retry?: () => void }) {
   if (loading) return <div className="request-skeleton" role="status" aria-label="正在加载" aria-busy="true"><Skeleton className="h-10 w-10" /><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-5/6" /></div>;
-  return <div className="request-state" role={error ? 'alert' : 'status'}>{error ? <><p>{error}</p><button className="secondary-button" onClick={retry}>重新加载</button></> : <><SearchX size={30} /><p>暂无符合条件的内容</p><span>请调整搜索或筛选条件</span></>}</div>;
+  return <div className="request-state" role={error ? 'alert' : 'status'}>{error ? <><p>{error}</p><button className="secondary-button" onClick={retry}>重新加载</button></> : <><SearchX size={30} /><p>暂无符合条件的内容</p></>}</div>;
 }
 export function Pagination({
   data,

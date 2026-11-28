@@ -229,6 +229,19 @@ import {
     assert.equal(onlyArchived.statusCode, 200, onlyArchived.body);
     assert.deepEqual(onlyArchived.json().data.items.map(i => i.id), ['rep-offline-same']);
 
+    // Verify organization facet splits comma-separated business_group and remains consistent when combined with search q
+    const orgFacet = Object.fromEntries(data.facets.organization.map(f => [f.value, f.count]));
+    assert.equal(orgFacet['药品事业群'], 3, 'Same-org active (1) + multi-org (1) + offline same-org (1) = 3');
+    assert.equal(orgFacet['健康品事业群'], 2, 'Cross-org granted (1) + multi-org (1) = 2');
+    const orgFiltered = await app.inject('/portal/api/portal/v1/reports?organization=' + encodeURIComponent('药品事业群'));
+    assert.equal(orgFiltered.statusCode, 200, orgFiltered.body);
+    assert.equal(orgFiltered.json().data.total, 3);
+    assert.equal(
+      Object.fromEntries(orgFiltered.json().data.facets.organization.map(f => [f.value, f.count]))['药品事业群'],
+      3,
+      'Selecting organization must not alter its own facet count',
+    );
+
     assert.equal(fineAuthorityQueryCount, 1, 'Filtered requests must reuse FineDB TTL cache');
     assert.equal(fineDeptQueryCount, 1, 'Filtered requests must reuse userDeptsCache');
     assert.equal(portalDictQueryCount, 1, 'Filtered requests must reuse catalogCache');

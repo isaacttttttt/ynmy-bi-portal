@@ -27,7 +27,7 @@ export function platformClient(env = process.env, fineDb) {
     tree: env.FINE_TREE_PATH || '/v10/view/entry/tree',
     favorites: env.FINE_FAVORITES_PATH || '/v10/favorite/entry/list',
     add: env.FINE_FAVORITE_ADD_PATH || '/v10/favorite/entry/{entryId}',
-    remove: env.FINE_FAVORITE_REMOVE_PATH || '/v10/favorite/entry/{entryId}?fakeMethod=DELETE',
+    remove: env.FINE_FAVORITE_REMOVE_PATH || '/v10/favorite/entry/{entryId}',
     roles: env.FINE_ROLES_PATH || '/v10/roles',
   };
   for (const [name, path] of Object.entries(paths)) {
@@ -36,8 +36,14 @@ export function platformClient(env = process.env, fineDb) {
   const rolesPrivilegeType = String(env.FINE_ROLES_PRIVILEGE_TYPE ?? '2');
   if (!/^\d{1,10}$/.test(rolesPrivilegeType)) throw new Error('Invalid FINE_ROLES_PRIVILEGE_TYPE');
   for (const name of ['add', 'remove']) if (!paths[name].includes('{entryId}')) throw new Error(`Platform ${name} path requires {entryId}`);
-  const addMethod = env.FINE_FAVORITE_ADD_METHOD || 'POST', removeMethod = env.FINE_FAVORITE_REMOVE_METHOD || 'POST';
-  if (![addMethod, removeMethod].every(method => ['POST', 'PUT', 'DELETE'].includes(method))) throw new Error('Invalid favorite HTTP method');
+  const addMethod = env.FINE_FAVORITE_ADD_METHOD || 'POST';
+  const configuredRemoveMethod = env.FINE_FAVORITE_REMOVE_METHOD || 'DELETE';
+  if (![addMethod, configuredRemoveMethod].every(method => ['POST', 'PUT', 'DELETE'].includes(method))) throw new Error('Invalid favorite HTTP method');
+  const legacyFakeDelete = configuredRemoveMethod === 'POST' && /[?&]fakeMethod=DELETE(?:&|$)/i.test(paths.remove);
+  const removeMethod = legacyFakeDelete ? 'DELETE' : configuredRemoveMethod;
+  if (legacyFakeDelete) {
+    paths.remove = paths.remove.replace(/([?&])fakeMethod=DELETE(&?)/i, (_, p1, p2) => (p1 === '?' && p2 ? '?' : p2 ? p1 : ''));
+  }
   const cookieName = env.FINE_COOKIE_NAME || 'fine_auth_token';
   const userCookieName = env.FINE_USER_COOKIE_NAME || 'fine_login_users';
   if (![cookieName, userCookieName].every(name => /^[\w-]+$/.test(name))) throw new Error('Invalid platform cookie name');
@@ -65,9 +71,22 @@ export function platformClient(env = process.env, fineDb) {
   async function call(token, path, method = 'GET', log, operation) {
     const started = Date.now();
     try {
+      const isMutation = method !== 'GET';
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        Accept: isMutation ? 'application/json, text/javascript, */*; q=0.01' : 'application/json',
+        ...(isMutation ? {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          Cookie: `${cookieName}=${encodeURIComponent(token)}`,
+        } : {}),
+      };
       const response = await fetch(/^https?:\/\//.test(path) ? path : base.href.replace(/\/$/, '') + path, {
-        method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        signal: AbortSignal.timeout(5000), redirect: 'error',
+        method,
+        headers,
+        ...(isMutation ? { body: '{}' } : {}),
+        signal: AbortSignal.timeout(5000),
+        redirect: 'error',
       });
       log?.info({ stage: 'platform', operation, method, status: response.status, durationMs: Date.now() - started }, 'platform response');
       if (response.status === 401) throw new ApiError(401, 'SESSION_EXPIRED', '登录已过期，请重新登录');

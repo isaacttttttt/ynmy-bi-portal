@@ -224,7 +224,7 @@ legend { margin-bottom:10px; font-size:14px; font-weight:600; color:#617fa6; }
 .dictionary-card.is-archived .card-main p { color:#7c8ba1; }
 .dictionary-card.is-archived .entry-icon,
 .dictionary-card.is-archived .folder-icon { filter:grayscale(100%); opacity:.72; }
-.dictionary-card .unregistered-hint { color:#9a6b2f; }
+.dictionary-card .unregistered-hint { color:#8c9bb0; }
 .dictionary-card .card-main { flex:none; }
 .dictionary-card .card-main h3 { width:100%; margin:8px 0 5px; }
 .dictionary-card .card-main p { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }

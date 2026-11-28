@@ -105,6 +105,12 @@ export const optionLabels: Record<string, string> = { granted: '有访问权限'
 export function paginate<T>(items: T[], page: number, pageSize: number): Page<T> {
   return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize };
 }
+function reportOrganizations(businessGroup: string): string[] {
+  const cleaned = businessGroup.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  if (!cleaned) return ['暂未维护'];
+  const parts = [...new Set(cleaned.split(/[,，]+/).map(part => part.trim()).filter(Boolean))];
+  return parts.length ? parts : ['暂未维护'];
+}
 export function queryReports(reports: Report[], query: ReportQuery): ReportPage {
   const q = query.q.trim().toLocaleLowerCase();
   const visitStatsUnavailable = reports.some(r => r.views === null);
@@ -113,24 +119,32 @@ export function queryReports(reports: Report[], query: ReportQuery): ReportPage 
   const matches: Report[] = [];
   for (const report of reports) {
     const statusFacet = report.status === 'archived' ? 'archived' : report.registered === false ? 'unregistered' : 'active';
-    const values = {
-      organization: report.businessGroup || '暂未维护', status: statusFacet, permission: report.permission,
-      frequency: report.frequency, volume: report.views === null ? '' : volume(report.views),
+    const values: Record<FilterKey, string[]> = {
+      organization: reportOrganizations(report.businessGroup || ''),
+      status: [statusFacet],
+      permission: [report.permission],
+      frequency: report.frequency ? [report.frequency] : [],
+      volume: report.views === null ? [] : [volume(report.views)],
     };
     const searched = matchesReportQuery(report, query.category ?? 'all', q);
     let excludedBy: FilterKey | undefined;
     let exclusions = 0;
     for (const { key, selected, counts } of groups) {
-      const value = values[key];
-      if (value && !counts.has(value)) counts.set(value, 0);
-      if (selected.size && !selected.has(value)) { excludedBy = key; exclusions++; }
+      const list = values[key];
+      for (const value of list) {
+        if (value && !counts.has(value)) counts.set(value, 0);
+      }
+      if (selected.size && !list.some(value => selected.has(value))) { excludedBy = key; exclusions++; }
     }
     if (!searched || exclusions > 1) continue;
     if (!excludedBy) matches.push(report);
     // A facet ignores its own filter, so a report excluded by one group still counts for that group.
     for (const { key, counts } of groups) {
-      const value = values[key];
-      if (value && (!excludedBy || excludedBy === key)) counts.set(value, (counts.get(value) ?? 0) + 1);
+      if (!excludedBy || excludedBy === key) {
+        for (const value of values[key]) {
+          if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
+        }
+      }
     }
   }
   const facets: ReportPage['facets'] = { organization: [], status: [], permission: [], frequency: [], volume: [] };

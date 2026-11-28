@@ -85,7 +85,7 @@ function mapReportRow(row, context, entries, visit, options = {}) {
     description: row.report_description || '',
     module: row.business_domain || '',
     tags: parseTags(row.tags),
-    businessGroup: row.business_group?.trim() || '',
+    businessGroup: (row.business_group || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim(),
     department: row.belonging_department || '',
     owner: row.suggested_owner_name || '',
     developer: row.developer_name || '',

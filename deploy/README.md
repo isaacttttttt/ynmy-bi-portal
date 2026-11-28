@@ -44,7 +44,7 @@ tail -f logs/portal.log
 | `FINE_TREE_PATH` | 当前用户有权限的目录列表 |
 | `FINE_FAVORITES_PATH` | 当前用户的收藏列表 |
 | `FINE_FAVORITE_ADD_PATH/METHOD` | 添加收藏；路径中的 `{entryId}` 自动替换 |
-| `FINE_FAVORITE_REMOVE_PATH/METHOD` | 取消收藏；默认 POST 加 `?fakeMethod=DELETE`，也可配置 DELETE |
+| `FINE_FAVORITE_REMOVE_PATH/METHOD` | 取消收藏；默认 `DELETE /v10/favorite/entry/{entryId}` |
 | `FINE_ROOT_ID` | 专题分析的置顶根目录 ID，不用于替代用户权限 |
 | `FINE_COOKIE_NAME` | 登录 token Cookie 名，默认 `fine_auth_token` |
 | `FINE_BROWSER_BASE_URL` | 浏览器侧平台路径，例如 `/WebReport/ReportServer`；不要填写 Docker 内网服务名 |

@@ -17,7 +17,7 @@ function Dictionary() {
   const filters: Filters = { organization: params.getAll('organization'), status: params.getAll('status'), permission: params.getAll('permission'), frequency: params.getAll('frequency'), volume: params.getAll('volume') };
   const page = Math.max(1, Number(params.get('page')) || 1);
   const [view, setView] = useState<'grid' | 'list'>('grid');
-  const result = usePortalRequest<ReportPage>(reportPath(query, filters, page, category));
+  const result = usePortalRequest<ReportPage>(reportPath(query, filters, page, category), undefined, { staleTimeMs: 0 });
   const filterData = result.data ?? result.previousData;
   function navigate(q: string, next: Filters, p = 1, searchCategory = category) {
     const search = new URLSearchParams();

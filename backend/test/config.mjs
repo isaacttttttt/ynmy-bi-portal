@@ -7,12 +7,16 @@ import { readdir } from 'node:fs/promises';
 const calls = [];
 const server = createServer((req, res) => {
   assert.equal(req.headers.authorization, 'Bearer verified-token');
-  calls.push([req.method, req.url]);
-  const data = req.url === '/customer/session' ? { userName: 'actual-user', name: 'Test' }
-    : req.url === '/customer/tree' ? [{ id: 'report-1', pId: null, text: 'Report', path: 'report.cpt', entryType: 1 }]
-    : req.url === '/different/favorites' ? [{ id: 'report-1' }, { id: 'not-granted' }]
-    : 'success';
-  res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ data }));
+  let rawBody = '';
+  req.on('data', chunk => { rawBody += chunk; });
+  req.on('end', () => {
+    calls.push([req.method, req.url, req.headers['content-type'] || '', req.headers['x-requested-with'] || '', rawBody, req.headers.cookie || '']);
+    const data = req.url === '/customer/session' ? { userName: 'actual-user', name: 'Test' }
+      : req.url === '/customer/tree' ? [{ id: 'report-1', pId: null, text: 'Report', path: 'report.cpt', entryType: 1 }]
+      : req.url === '/different/favorites' ? [{ id: 'report-1' }, { id: 'not-granted' }]
+      : 'success';
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ data }));
+  });
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -35,7 +39,24 @@ try {
   assert.equal(context.entries[0].iconUrl, '/files/imgs/report-1.png');
   assert.deepEqual(await platform.favorites(context), ['report-1']);
   await platform.favorite(context, 'report-1', true); await platform.favorite(context, 'report-1', false);
-  assert.deepEqual(calls.slice(0,5), [['GET','/customer/session'],['GET','/customer/tree'],['GET','/different/favorites'],['PUT','/customer/saved/report-1'],['DELETE','/customer/saved/report-1']]);
+  assert.deepEqual(calls.slice(0,5).map(([m, u]) => [m, u]), [['GET','/customer/session'],['GET','/customer/tree'],['GET','/different/favorites'],['PUT','/customer/saved/report-1'],['DELETE','/customer/saved/report-1']]);
+  // Verify favorite mutations send JSON content-type, X-Requested-With, Cookie, and {} body (matching FineBI platform HAR)
+  for (const [, , contentType, xrw, body, cookie] of calls.slice(3, 5)) {
+    assert.equal(contentType, 'application/json');
+    assert.equal(xrw, 'XMLHttpRequest');
+    assert.equal(body, '{}');
+    assert.equal(cookie, 'customer_token=verified-token');
+  }
+  // Verify legacy POST + ?fakeMethod=DELETE config auto-normalizes to DELETE without fakeMethod query param
+  const legacyClient = platformClient({
+    ...env,
+    FINE_FAVORITE_REMOVE_PATH: '/saved/{entryId}?fakeMethod=DELETE',
+    FINE_FAVORITE_REMOVE_METHOD: 'POST',
+  });
+  calls.length = 0;
+  await legacyClient.favorite(context, 'report-1', false);
+  assert.deepEqual(calls.map(([m, u]) => [m, u]), [['DELETE', '/customer/saved/report-1']]);
+  assert.equal(calls[0][4], '{}');
   await assert.rejects(platform.context({ headers: { cookie: 'fine_auth_token=verified-token' } }), { statusCode: 401 });
   assert.throws(() => platformClient({ ...env, FINE_TREE_PATH: '//other.example/tree' }));
   process.env.PUBLIC_ORIGIN = 'https://customer.example'; process.env.FINE_ROOT_ID = 'report-1';
@@ -84,6 +105,6 @@ try {
   } });
   assert.equal(realtimeUser.statusCode, 200, realtimeUser.body);
   assert.deepEqual(realtimeUser.json().data.user, { name: 'FineDB New User' });
-  assert.deepEqual(calls, [['GET', '/customer/tree'], ['GET', '/different/favorites']]);
+  assert.deepEqual(calls.map(([m, u]) => [m, u]), [['GET', '/customer/tree'], ['GET', '/different/favorites']]);
   console.log('PASS: custom endpoints, cookie, icon template, session and FineDB identities, base path and permission filtering.');
 } finally { if (app) await app.close(); await new Promise(resolve => server.close(resolve)); }
